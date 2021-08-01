@@ -1090,6 +1090,10 @@ fn main() {
     let (shader_binding_table_buffer, shader_binding_table_memory) = {
         let group_count = 3; // Listed in vk::RayTracingPipelineCreateInfoNV
                              // let table_size = (rt_properties.shader_group_handle_size * group_count) as u64;
+        let handle_size_aligned = aligned_size(
+            rt_properties.shader_group_handle_size,
+            rt_properties.shader_group_base_alignment,
+        );
         let table_size = (aligned_size(
             rt_properties.shader_group_handle_size,
             rt_properties.shader_group_base_alignment,
@@ -1097,11 +1101,24 @@ fn main() {
         let mut table_data: Vec<u8> = vec![0u8; table_size as usize];
         unsafe {
             ray_tracing
+                .get_ray_tracing_shader_group_handles(graphics_pipeline, 0, 1, &mut table_data)
+                .unwrap();
+
+            ray_tracing
                 .get_ray_tracing_shader_group_handles(
                     graphics_pipeline,
-                    0,
-                    group_count,
-                    &mut table_data,
+                    1,
+                    1,
+                    &mut table_data[handle_size_aligned as usize..],
+                )
+                .unwrap();
+
+            ray_tracing
+                .get_ray_tracing_shader_group_handles(
+                    graphics_pipeline,
+                    2,
+                    1,
+                    &mut table_data[2 * handle_size_aligned as usize..],
                 )
                 .unwrap();
         }
@@ -1288,12 +1305,10 @@ fn main() {
     {
         let handle_size = rt_properties.shader_group_handle_size as u64;
 
-        /*
-        let handle_size = aligned_size(
+        let handle_size_aligned = aligned_size(
             rt_properties.shader_group_handle_size,
             rt_properties.shader_group_base_alignment,
         ) as u64;
-        */
 
         // |[ raygen shader ]|[ hit shader  ]|[ miss shader ]|
         // |                 |               |               |
@@ -1303,12 +1318,12 @@ fn main() {
         let sbt_raygen_offset = 0;
 
         let sbt_miss_buffer = shader_binding_table_buffer;
-        let sbt_miss_offset = 2 * handle_size;
-        let sbt_miss_stride = handle_size;
+        let sbt_miss_offset = 2 * handle_size_aligned;
+        let sbt_miss_stride = handle_size_aligned;
 
         let sbt_hit_buffer = shader_binding_table_buffer;
-        let sbt_hit_offset = 1 * handle_size;
-        let sbt_hit_stride = handle_size;
+        let sbt_hit_offset = 1 * handle_size_aligned;
+        let sbt_hit_stride = handle_size_aligned;
 
         let sbt_call_buffer = vk::Buffer::null();
         let sbt_call_offset = 0;
