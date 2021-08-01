@@ -525,98 +525,107 @@ fn main() {
         }
     }
 
-    let copy_region = vk::ImageCopy::builder()
-        .src_subresource(
-            vk::ImageSubresourceLayers::builder()
-                .aspect_mask(vk::ImageAspectFlags::COLOR)
-                .layer_count(1)
-                .build(),
-        )
-        .dst_subresource(
-            vk::ImageSubresourceLayers::builder()
-                .aspect_mask(vk::ImageAspectFlags::COLOR)
-                .layer_count(1)
-                .build(),
-        )
-        .extent(
-            vk::Extent3D::builder()
-                .width(WIDTH)
-                .height(HEIGHT)
-                .depth(1)
-                .build(),
-        )
-        .build();
+    {
+        let copy_region = vk::ImageCopy::builder()
+            .src_subresource(
+                vk::ImageSubresourceLayers::builder()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .layer_count(1)
+                    .build(),
+            )
+            .dst_subresource(
+                vk::ImageSubresourceLayers::builder()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .layer_count(1)
+                    .build(),
+            )
+            .extent(
+                vk::Extent3D::builder()
+                    .width(WIDTH)
+                    .height(HEIGHT)
+                    .depth(1)
+                    .build(),
+            )
+            .build();
 
-    unsafe {
-        device.cmd_copy_image(
-            copy_cmd,
-            image,
-            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-            dst_image,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            &[copy_region],
-        );
+        unsafe {
+            device.cmd_copy_image(
+                copy_cmd,
+                image,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                dst_image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &[copy_region],
+            );
+        }
     }
 
-    let image_barrier = vk::ImageMemoryBarrier::builder()
-        .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-        .dst_access_mask(vk::AccessFlags::MEMORY_READ)
-        .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-        .new_layout(vk::ImageLayout::GENERAL)
-        .image(dst_image)
-        .subresource_range(
-            vk::ImageSubresourceRange::builder()
-                .aspect_mask(vk::ImageAspectFlags::COLOR)
-                .base_mip_level(0)
-                .level_count(1)
-                .base_array_layer(0)
-                .layer_count(1)
-                .build(),
-        )
-        .build();
+    {
+        let image_barrier = vk::ImageMemoryBarrier::builder()
+            .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+            .dst_access_mask(vk::AccessFlags::MEMORY_READ)
+            .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+            .new_layout(vk::ImageLayout::GENERAL)
+            .image(dst_image)
+            .subresource_range(
+                vk::ImageSubresourceRange::builder()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .base_mip_level(0)
+                    .level_count(1)
+                    .base_array_layer(0)
+                    .layer_count(1)
+                    .build(),
+            )
+            .build();
 
-    unsafe {
-        device.cmd_pipeline_barrier(
-            copy_cmd,
-            vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::TRANSFER,
-            vk::DependencyFlags::empty(),
-            &[],
-            &[],
-            &[image_barrier],
-        );
+        unsafe {
+            device.cmd_pipeline_barrier(
+                copy_cmd,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[image_barrier],
+            );
+        }
     }
 
-    let submit_infos = [vk::SubmitInfo {
-        s_type: vk::StructureType::SUBMIT_INFO,
-        p_next: ptr::null(),
-        wait_semaphore_count: 0,
-        p_wait_semaphores: null(),
-        p_wait_dst_stage_mask: null(),
-        command_buffer_count: 1,
-        p_command_buffers: &copy_cmd,
-        signal_semaphore_count: 0,
-        p_signal_semaphores: null(),
-    }];
+    {
+        let submit_infos = [vk::SubmitInfo {
+            s_type: vk::StructureType::SUBMIT_INFO,
+            p_next: ptr::null(),
+            wait_semaphore_count: 0,
+            p_wait_semaphores: null(),
+            p_wait_dst_stage_mask: null(),
+            command_buffer_count: 1,
+            p_command_buffers: &copy_cmd,
+            signal_semaphore_count: 0,
+            p_signal_semaphores: null(),
+        }];
 
-    unsafe {
-        device.end_command_buffer(copy_cmd).unwrap();
+        unsafe {
+            device.end_command_buffer(copy_cmd).unwrap();
 
-        device
-            .reset_fences(&[fence])
-            .expect("Failed to reset Fence!");
+            device
+                .reset_fences(&[fence])
+                .expect("Failed to reset Fence!");
 
-        device
-            .queue_submit(graphics_queue, &submit_infos, fence)
-            .expect("Failed to execute queue submit.");
+            device
+                .queue_submit(graphics_queue, &submit_infos, fence)
+                .expect("Failed to execute queue submit.");
 
-        device.wait_for_fences(&[fence], true, u64::MAX).unwrap();
+            device.wait_for_fences(&[fence], true, u64::MAX).unwrap();
+        }
     }
 
-    let subresource = vk::ImageSubresource::builder()
-        .aspect_mask(vk::ImageAspectFlags::COLOR)
-        .build();
-    let subresource_layout = unsafe { device.get_image_subresource_layout(dst_image, subresource) };
+    let subresource_layout = {
+        let subresource = vk::ImageSubresource::builder()
+            .aspect_mask(vk::ImageAspectFlags::COLOR)
+            .build();
+
+        unsafe { device.get_image_subresource_layout(dst_image, subresource) }
+    };
 
     let data: *const u8 = unsafe {
         device
