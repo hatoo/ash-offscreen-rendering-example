@@ -217,7 +217,7 @@ fn main() {
 
     let image_create_info = vk::ImageCreateInfo::builder()
         .image_type(vk::ImageType::TYPE_2D)
-        .format(vk::Format::R8G8B8A8_UNORM)
+        .format(color_format)
         .extent(
             vk::Extent3D::builder()
                 .width(WIDTH)
