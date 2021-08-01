@@ -137,56 +137,38 @@ fn main() {
 
     let extent = vk::Extent2D::builder().width(WIDTH).height(HEIGHT).build();
 
-    let viewports = [vk::Viewport {
-        x: 0.0,
-        y: 0.0,
-        width: extent.width as f32,
-        height: extent.height as f32,
-        min_depth: 0.0,
-        max_depth: 1.0,
-    }];
+    let viewport_state_create_info = vk::PipelineViewportStateCreateInfo::builder()
+        .scissors(&[vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+            extent,
+        }])
+        .viewports(&[vk::Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: extent.width as f32,
+            height: extent.height as f32,
+            min_depth: 0.0,
+            max_depth: 1.0,
+        }])
+        .build();
 
-    let scissors = [vk::Rect2D {
-        offset: vk::Offset2D { x: 0, y: 0 },
-        extent,
-    }];
+    let rasterization_statue_create_info = vk::PipelineRasterizationStateCreateInfo::builder()
+        .depth_clamp_enable(false)
+        .cull_mode(vk::CullModeFlags::BACK)
+        .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
+        .line_width(1.0)
+        .polygon_mode(vk::PolygonMode::FILL)
+        .rasterizer_discard_enable(false)
+        .depth_bias_enable(false)
+        .build();
 
-    let viewport_state_create_info = vk::PipelineViewportStateCreateInfo {
-        s_type: vk::StructureType::PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-        p_next: ptr::null(),
-        flags: vk::PipelineViewportStateCreateFlags::empty(),
-        scissor_count: scissors.len() as u32,
-        p_scissors: scissors.as_ptr(),
-        viewport_count: viewports.len() as u32,
-        p_viewports: viewports.as_ptr(),
-    };
-
-    let rasterization_statue_create_info = vk::PipelineRasterizationStateCreateInfo {
-        s_type: vk::StructureType::PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-        p_next: ptr::null(),
-        flags: vk::PipelineRasterizationStateCreateFlags::empty(),
-        depth_clamp_enable: vk::FALSE,
-        cull_mode: vk::CullModeFlags::FRONT,
-        front_face: vk::FrontFace::CLOCKWISE,
-        line_width: 1.0,
-        polygon_mode: vk::PolygonMode::FILL,
-        rasterizer_discard_enable: vk::FALSE,
-        depth_bias_clamp: 0.0,
-        depth_bias_constant_factor: 0.0,
-        depth_bias_enable: vk::FALSE,
-        depth_bias_slope_factor: 0.0,
-    };
-    let multisample_state_create_info = vk::PipelineMultisampleStateCreateInfo {
-        s_type: vk::StructureType::PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        flags: vk::PipelineMultisampleStateCreateFlags::empty(),
-        p_next: ptr::null(),
-        rasterization_samples: vk::SampleCountFlags::TYPE_1,
-        sample_shading_enable: vk::FALSE,
-        min_sample_shading: 0.0,
-        p_sample_mask: ptr::null(),
-        alpha_to_one_enable: vk::FALSE,
-        alpha_to_coverage_enable: vk::FALSE,
-    };
+    let multisample_state_create_info = vk::PipelineMultisampleStateCreateInfo::builder()
+        .rasterization_samples(vk::SampleCountFlags::TYPE_1)
+        .sample_shading_enable(false)
+        .min_sample_shading(0.0)
+        .alpha_to_coverage_enable(false)
+        .alpha_to_coverage_enable(false)
+        .build();
 
     let stencil_state = vk::StencilOpState {
         fail_op: vk::StencilOp::KEEP,
@@ -198,20 +180,17 @@ fn main() {
         reference: 0,
     };
 
-    let depth_state_create_info = vk::PipelineDepthStencilStateCreateInfo {
-        s_type: vk::StructureType::PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-        p_next: ptr::null(),
-        flags: vk::PipelineDepthStencilStateCreateFlags::empty(),
-        depth_test_enable: vk::FALSE,
-        depth_write_enable: vk::FALSE,
-        depth_compare_op: vk::CompareOp::LESS_OR_EQUAL,
-        depth_bounds_test_enable: vk::FALSE,
-        stencil_test_enable: vk::FALSE,
-        front: stencil_state,
-        back: stencil_state,
-        max_depth_bounds: 1.0,
-        min_depth_bounds: 0.0,
-    };
+    let depth_state_create_info = vk::PipelineDepthStencilStateCreateInfo::builder()
+        .depth_test_enable(false)
+        .depth_write_enable(false)
+        .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL)
+        .depth_bounds_test_enable(false)
+        .stencil_test_enable(false)
+        .front(stencil_state)
+        .back(stencil_state)
+        .max_depth_bounds(1.0)
+        .min_depth_bounds(0.0)
+        .build();
 
     let color_blend_attachment_states = [vk::PipelineColorBlendAttachmentState {
         blend_enable: vk::FALSE,
@@ -224,32 +203,15 @@ fn main() {
         alpha_blend_op: vk::BlendOp::ADD,
     }];
 
-    let color_blend_state = vk::PipelineColorBlendStateCreateInfo {
-        s_type: vk::StructureType::PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-        p_next: ptr::null(),
-        flags: vk::PipelineColorBlendStateCreateFlags::empty(),
-        logic_op_enable: vk::FALSE,
-        logic_op: vk::LogicOp::COPY,
-        attachment_count: color_blend_attachment_states.len() as u32,
-        p_attachments: color_blend_attachment_states.as_ptr(),
-        blend_constants: [0.0, 0.0, 0.0, 0.0],
-    };
+    let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
+        .attachments(&color_blend_attachment_states)
+        .build();
 
-    let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo {
-        s_type: vk::StructureType::PIPELINE_LAYOUT_CREATE_INFO,
-        p_next: ptr::null(),
-        flags: vk::PipelineLayoutCreateFlags::empty(),
-        set_layout_count: 0,
-        p_set_layouts: ptr::null(),
-        push_constant_range_count: 0,
-        p_push_constant_ranges: ptr::null(),
-    };
+    let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default();
 
-    let pipeline_layout = unsafe {
-        device
-            .create_pipeline_layout(&pipeline_layout_create_info, None)
-            .expect("Failed to create pipeline layout!")
-    };
+    let pipeline_layout =
+        unsafe { device.create_pipeline_layout(&pipeline_layout_create_info, None) }
+            .expect("Failed to create pipeline layout!");
 
     let color_format = vk::Format::R8G8B8A8_UNORM;
 
