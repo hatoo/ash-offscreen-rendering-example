@@ -335,32 +335,21 @@ fn main() {
             .expect("Failed to create Framebuffer!")
     };
 
-    let command_pool_create_info = vk::CommandPoolCreateInfo {
-        s_type: vk::StructureType::COMMAND_POOL_CREATE_INFO,
-        p_next: ptr::null(),
-        flags: vk::CommandPoolCreateFlags::empty(),
-        queue_family_index,
-    };
+    let command_pool_create_info = vk::CommandPoolCreateInfo::builder()
+        .queue_family_index(queue_family_index)
+        .build();
 
-    let command_pool = unsafe {
-        device
-            .create_command_pool(&command_pool_create_info, None)
-            .expect("Failed to create Command Pool!")
-    };
+    let command_pool = unsafe { device.create_command_pool(&command_pool_create_info, None) }
+        .expect("Failed to create Command Pool!");
 
-    let command_buffer_allocate_info = vk::CommandBufferAllocateInfo {
-        s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
-        p_next: ptr::null(),
-        command_buffer_count: 1,
-        command_pool,
-        level: vk::CommandBufferLevel::PRIMARY,
-    };
+    let command_buffer_allocate_info = vk::CommandBufferAllocateInfo::builder()
+        .command_buffer_count(1)
+        .command_pool(command_pool)
+        .level(vk::CommandBufferLevel::PRIMARY)
+        .build();
 
-    let command_buffers = unsafe {
-        device
-            .allocate_command_buffers(&command_buffer_allocate_info)
-            .expect("Failed to allocate Command Buffers!")
-    };
+    let command_buffers = unsafe { device.allocate_command_buffers(&command_buffer_allocate_info) }
+        .expect("Failed to allocate Command Buffers!");
 
     let command_buffer_begin_info = vk::CommandBufferBeginInfo {
         s_type: vk::StructureType::COMMAND_BUFFER_BEGIN_INFO,
