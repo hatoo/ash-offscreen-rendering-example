@@ -6,7 +6,65 @@ use std::{
     ptr::{self, null},
 };
 
-use ash::{prelude::VkResult, vk};
+use ash::{prelude::VkResult, util::Align, vk};
+
+#[repr(C)]
+#[derive(Clone, Debug, Copy)]
+struct Vertex {
+    pos: [f32; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Debug, Copy)]
+struct GeometryInstance {
+    transform: [f32; 12],
+    instance_id_and_mask: u32,
+    instance_offset_and_flags: u32,
+    acceleration_handle: u64,
+}
+
+impl GeometryInstance {
+    fn new(
+        transform: [f32; 12],
+        id: u32,
+        mask: u8,
+        offset: u32,
+        flags: vk::GeometryInstanceFlagsNV,
+        acceleration_handle: u64,
+    ) -> Self {
+        let mut instance = GeometryInstance {
+            transform,
+            instance_id_and_mask: 0,
+            instance_offset_and_flags: 0,
+            acceleration_handle,
+        };
+        instance.set_id(id);
+        instance.set_mask(mask);
+        instance.set_offset(offset);
+        instance.set_flags(flags);
+        instance
+    }
+
+    fn set_id(&mut self, id: u32) {
+        let id = id & 0x00ffffff;
+        self.instance_id_and_mask |= id;
+    }
+
+    fn set_mask(&mut self, mask: u8) {
+        let mask = mask as u32;
+        self.instance_id_and_mask |= mask << 24;
+    }
+
+    fn set_offset(&mut self, offset: u32) {
+        let offset = offset & 0x00ffffff;
+        self.instance_offset_and_flags |= offset;
+    }
+
+    fn set_flags(&mut self, flags: vk::GeometryInstanceFlagsNV) {
+        let flags = flags.as_raw() as u32;
+        self.instance_offset_and_flags |= flags << 24;
+    }
+}
 
 fn main() {
     const ENABLE_VALIDATION_LAYER: bool = cfg!(debug_assertions);
@@ -98,11 +156,14 @@ fn main() {
             .push_next(&mut physical_device_vulkan_memory_model_features)
             .queue_create_infos(&[queue_create_info])
             .enabled_layer_names(validation_layers_ptr.as_slice())
+            .enabled_extension_names(&[ash::extensions::nv::RayTracing::name().as_ptr()])
             .build();
 
         unsafe { instance.create_device(physical_device, &device_create_info, None) }
             .expect("Failed to create logical Device!")
     };
+
+    let ray_tracing = ash::extensions::nv::RayTracing::new(&instance, &device);
 
     let graphics_queue = unsafe { device.get_device_queue(queue_family_index, 0) };
 
@@ -167,6 +228,399 @@ fn main() {
             .build();
 
         unsafe { device.create_image_view(&image_view_create_info, None) }.unwrap()
+    };
+
+    // acceleration structures
+
+    let (vertex_count, vertex_stride, vertex_buffer, vertex_memory) = {
+        let vertices = [
+            Vertex {
+                pos: [-0.5, -0.5, 0.0],
+            },
+            Vertex {
+                pos: [0.0, 0.5, 0.0],
+            },
+            Vertex {
+                pos: [0.5, -0.5, 0.0],
+            },
+        ];
+
+        let vertex_count = vertices.len();
+        let vertex_stride = std::mem::size_of::<Vertex>();
+
+        let vertex_buffer_size = vertex_stride * vertex_count;
+
+        let buffer_create_info = vk::BufferCreateInfo::builder()
+            .size(vertex_buffer_size as u64)
+            .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .build();
+
+        let buffer = unsafe { device.create_buffer(&buffer_create_info, None) }.unwrap();
+
+        let memory_req = unsafe { device.get_buffer_memory_requirements(buffer) };
+
+        let memory_index = get_memory_type_index(
+            device_memory_properties,
+            memory_req.memory_type_bits,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        );
+
+        let allocate_info = vk::MemoryAllocateInfo {
+            allocation_size: memory_req.size,
+            memory_type_index: memory_index,
+            ..Default::default()
+        };
+
+        let memory = unsafe { device.allocate_memory(&allocate_info, None).unwrap() };
+
+        unsafe { device.bind_buffer_memory(buffer, memory, 0) }.unwrap();
+
+        let mapped_ptr = unsafe {
+            device.map_memory(
+                memory,
+                0,
+                vertex_buffer_size as u64,
+                vk::MemoryMapFlags::empty(),
+            )
+        }
+        .unwrap();
+
+        let mut mapped_slice = unsafe {
+            Align::new(
+                mapped_ptr,
+                std::mem::align_of::<Vertex>() as u64,
+                vertex_buffer_size as u64,
+            )
+        };
+        mapped_slice.copy_from_slice(&vertices);
+        unsafe {
+            device.unmap_memory(memory);
+        }
+        (vertex_count, vertex_stride, buffer, memory)
+    };
+
+    let (index_count, index_buffer, index_memory) = {
+        let indices = [0u16, 1, 2];
+
+        let index_count = indices.len();
+        let index_buffer_size = std::mem::size_of::<u16>() * index_count;
+
+        let buffer_create_info = vk::BufferCreateInfo::builder()
+            .size(index_buffer_size as u64)
+            .usage(vk::BufferUsageFlags::INDEX_BUFFER)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .build();
+
+        let buffer = unsafe { device.create_buffer(&buffer_create_info, None) }.unwrap();
+
+        let memory_req = unsafe { device.get_buffer_memory_requirements(buffer) };
+
+        let memory_index = get_memory_type_index(
+            device_memory_properties,
+            memory_req.memory_type_bits,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        );
+
+        let allocate_info = vk::MemoryAllocateInfo {
+            allocation_size: memory_req.size,
+            memory_type_index: memory_index,
+            ..Default::default()
+        };
+
+        let memory = unsafe { device.allocate_memory(&allocate_info, None).unwrap() };
+
+        unsafe { device.bind_buffer_memory(buffer, memory, 0) }.unwrap();
+
+        let mapped_ptr = unsafe {
+            device.map_memory(
+                memory,
+                0,
+                index_buffer_size as u64,
+                vk::MemoryMapFlags::empty(),
+            )
+        }
+        .unwrap();
+
+        let mut mapped_slice = unsafe {
+            Align::new(
+                mapped_ptr,
+                std::mem::align_of::<u16>() as u64,
+                index_buffer_size as u64,
+            )
+        };
+        mapped_slice.copy_from_slice(&indices);
+        unsafe {
+            device.unmap_memory(memory);
+        }
+        (index_count, buffer, memory)
+    };
+
+    let geometry = vec![vk::GeometryNV::builder()
+        .geometry_type(vk::GeometryTypeNV::TRIANGLES)
+        .geometry(
+            vk::GeometryDataNV::builder()
+                .triangles(
+                    vk::GeometryTrianglesNV::builder()
+                        .vertex_data(vertex_buffer)
+                        .vertex_offset(0)
+                        .vertex_count(vertex_count as u32)
+                        .vertex_stride(vertex_stride as u64)
+                        .vertex_format(vk::Format::R32G32B32_SFLOAT)
+                        .index_data(index_buffer)
+                        .index_offset(0)
+                        .index_count(index_count as u32)
+                        .index_type(vk::IndexType::UINT16)
+                        .build(),
+                )
+                .build(),
+        )
+        .flags(vk::GeometryFlagsNV::OPAQUE)
+        .build()];
+
+    // Create bottom-level acceleration structure
+
+    let bottom_as = {
+        let accel_info = vk::AccelerationStructureCreateInfoNV::builder()
+            .compacted_size(0)
+            .info(
+                vk::AccelerationStructureInfoNV::builder()
+                    .ty(vk::AccelerationStructureTypeNV::BOTTOM_LEVEL)
+                    .geometries(&geometry)
+                    .flags(vk::BuildAccelerationStructureFlagsNV::PREFER_FAST_TRACE)
+                    .build(),
+            )
+            .build();
+
+        unsafe { ray_tracing.create_acceleration_structure(&accel_info, None) }.unwrap()
+    };
+
+    let memory_requirements = unsafe {
+        ray_tracing.get_acceleration_structure_memory_requirements(
+            &vk::AccelerationStructureMemoryRequirementsInfoNV::builder()
+                .acceleration_structure(bottom_as)
+                .ty(vk::AccelerationStructureMemoryRequirementsTypeNV::OBJECT)
+                .build(),
+        )
+    };
+
+    let bottom_as_memory = unsafe {
+        device.allocate_memory(
+            &vk::MemoryAllocateInfo::builder()
+                .allocation_size(memory_requirements.memory_requirements.size)
+                .memory_type_index(get_memory_type_index(
+                    device_memory_properties,
+                    memory_requirements.memory_requirements.memory_type_bits,
+                    vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                ))
+                .build(),
+            None,
+        )
+    }
+    .unwrap();
+
+    unsafe {
+        ray_tracing.bind_acceleration_structure_memory(&[
+            vk::BindAccelerationStructureMemoryInfoNV::builder()
+                .acceleration_structure(bottom_as)
+                .memory(bottom_as_memory)
+                .build(),
+        ])
+    }
+    .unwrap();
+
+    let accel_handle = unsafe { ray_tracing.get_acceleration_structure_handle(bottom_as) }.unwrap();
+
+    let (instance_count, instance_buffer, instance_memory) = {
+        let transform_0: [f32; 12] = [1.0, 0.0, 0.0, -1.5, 0.0, 1.0, 0.0, 1.1, 0.0, 0.0, 1.0, 0.0];
+
+        let transform_1: [f32; 12] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.1, 0.0, 0.0, 1.0, 0.0];
+
+        let transform_2: [f32; 12] = [1.0, 0.0, 0.0, 1.5, 0.0, 1.0, 0.0, 1.1, 0.0, 0.0, 1.0, 0.0];
+
+        let instances = vec![
+            GeometryInstance::new(
+                transform_0,
+                0, /* instance id */
+                0xff,
+                0,
+                vk::GeometryInstanceFlagsNV::TRIANGLE_CULL_DISABLE_NV,
+                accel_handle,
+            ),
+            GeometryInstance::new(
+                transform_1,
+                1, /* instance id */
+                0xff,
+                0,
+                vk::GeometryInstanceFlagsNV::TRIANGLE_CULL_DISABLE_NV,
+                accel_handle,
+            ),
+            GeometryInstance::new(
+                transform_2,
+                2, /* instance id */
+                0xff,
+                0,
+                vk::GeometryInstanceFlagsNV::TRIANGLE_CULL_DISABLE_NV,
+                accel_handle,
+            ),
+        ];
+
+        let instance_buffer_size = std::mem::size_of::<GeometryInstance>() * instances.len();
+
+        let buffer_create_info = vk::BufferCreateInfo::builder()
+            .size(instance_buffer_size as u64)
+            .usage(vk::BufferUsageFlags::RAY_TRACING_NV)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .build();
+
+        let buffer = unsafe { device.create_buffer(&buffer_create_info, None) }.unwrap();
+
+        let memory_req = unsafe { device.get_buffer_memory_requirements(buffer) };
+
+        let memory_index = get_memory_type_index(
+            device_memory_properties,
+            memory_req.memory_type_bits,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        );
+
+        let allocate_info = vk::MemoryAllocateInfo {
+            allocation_size: memory_req.size,
+            memory_type_index: memory_index,
+            ..Default::default()
+        };
+
+        let memory = unsafe { device.allocate_memory(&allocate_info, None).unwrap() };
+
+        unsafe { device.bind_buffer_memory(buffer, memory, 0) }.unwrap();
+
+        let mapped_ptr = unsafe {
+            device.map_memory(
+                memory,
+                0,
+                instance_buffer_size as u64,
+                vk::MemoryMapFlags::empty(),
+            )
+        }
+        .unwrap();
+
+        let mut mapped_slice = unsafe {
+            Align::new(
+                mapped_ptr,
+                std::mem::align_of::<GeometryInstance>() as u64,
+                instance_buffer_size as u64,
+            )
+        };
+        mapped_slice.copy_from_slice(&instances);
+        unsafe {
+            device.unmap_memory(memory);
+        }
+        (instances.len(), buffer, memory)
+    };
+
+    let top_as = {
+        let accel_info = vk::AccelerationStructureCreateInfoNV::builder()
+            .compacted_size(0)
+            .info(
+                vk::AccelerationStructureInfoNV::builder()
+                    .ty(vk::AccelerationStructureTypeNV::TOP_LEVEL)
+                    .instance_count(instance_count as u32)
+                    .build(),
+            )
+            .build();
+
+        unsafe { ray_tracing.create_acceleration_structure(&accel_info, None) }.unwrap()
+    };
+
+    let memory_requirements = unsafe {
+        ray_tracing.get_acceleration_structure_memory_requirements(
+            &vk::AccelerationStructureMemoryRequirementsInfoNV::builder()
+                .acceleration_structure(top_as)
+                .ty(vk::AccelerationStructureMemoryRequirementsTypeNV::OBJECT)
+                .build(),
+        )
+    };
+
+    let top_as_memory = unsafe {
+        device.allocate_memory(
+            &vk::MemoryAllocateInfo::builder()
+                .allocation_size(memory_requirements.memory_requirements.size)
+                .memory_type_index(get_memory_type_index(
+                    device_memory_properties,
+                    memory_requirements.memory_requirements.memory_type_bits,
+                    vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                ))
+                .build(),
+            None,
+        )
+    }
+    .unwrap();
+
+    unsafe {
+        ray_tracing.bind_acceleration_structure_memory(&[
+            vk::BindAccelerationStructureMemoryInfoNV::builder()
+                .acceleration_structure(top_as)
+                .memory(top_as_memory)
+                .build(),
+        ])
+    }
+    .unwrap();
+
+    // Build acceleration structures
+
+    let bottom_as_size = {
+        let requirements = unsafe {
+            ray_tracing.get_acceleration_structure_memory_requirements(
+                &vk::AccelerationStructureMemoryRequirementsInfoNV::builder()
+                    .acceleration_structure(bottom_as)
+                    .ty(vk::AccelerationStructureMemoryRequirementsTypeNV::BUILD_SCRATCH)
+                    .build(),
+            )
+        };
+        requirements.memory_requirements.size
+    };
+
+    let top_as_size = {
+        let requirements = unsafe {
+            ray_tracing.get_acceleration_structure_memory_requirements(
+                &vk::AccelerationStructureMemoryRequirementsInfoNV::builder()
+                    .acceleration_structure(top_as)
+                    .ty(vk::AccelerationStructureMemoryRequirementsTypeNV::BUILD_SCRATCH)
+                    .build(),
+            )
+        };
+        requirements.memory_requirements.size
+    };
+
+    let (scratch_buffer, scratch_memory) = {
+        let scratch_buffer_size = std::cmp::max(bottom_as_size, top_as_size);
+
+        let buffer_create_info = vk::BufferCreateInfo::builder()
+            .size(scratch_buffer_size as u64)
+            .usage(vk::BufferUsageFlags::RAY_TRACING_NV)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .build();
+
+        let buffer = unsafe { device.create_buffer(&buffer_create_info, None) }.unwrap();
+
+        let memory_req = unsafe { device.get_buffer_memory_requirements(buffer) };
+
+        let memory_index = get_memory_type_index(
+            device_memory_properties,
+            memory_req.memory_type_bits,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        );
+
+        let allocate_info = vk::MemoryAllocateInfo {
+            allocation_size: memory_req.size,
+            memory_type_index: memory_index,
+            ..Default::default()
+        };
+
+        let memory = unsafe { device.allocate_memory(&allocate_info, None).unwrap() };
+
+        unsafe { device.bind_buffer_memory(buffer, memory, 0) }.unwrap();
+
+        (buffer, memory)
     };
 
     // render pass
