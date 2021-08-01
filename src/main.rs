@@ -1012,6 +1012,12 @@ fn main() {
     let (shader_binding_table_buffer, shader_binding_table_memory) = {
         let group_count = 3; // Listed in vk::RayTracingPipelineCreateInfoNV
         let table_size = (rt_properties.shader_group_handle_size * group_count) as u64;
+        /*
+        let table_size = (aligned_size(
+            rt_properties.shader_group_handle_size,
+            rt_properties.shader_group_base_alignment,
+        ) * group_count) as u64;
+        */
         let mut table_data: Vec<u8> = vec![0u8; table_size as usize];
         unsafe {
             ray_tracing
@@ -1023,8 +1029,6 @@ fn main() {
                 )
                 .unwrap();
         }
-        let table_size = vertex_stride * vertex_count;
-
         let buffer_create_info = vk::BufferCreateInfo::builder()
             .size(table_size as u64)
             .usage(vk::BufferUsageFlags::TRANSFER_SRC)
@@ -1207,6 +1211,13 @@ fn main() {
 
     {
         let handle_size = rt_properties.shader_group_handle_size as u64;
+
+        /*
+        let handle_size = aligned_size(
+            rt_properties.shader_group_handle_size,
+            rt_properties.shader_group_base_alignment,
+        ) as u64;
+        */
 
         // |[ raygen shader ]|[ hit shader  ]|[ miss shader ]|
         // |                 |               |               |
@@ -1715,4 +1726,8 @@ impl BufferResource {
             device.unmap_memory(self.memory);
         }
     }
+}
+
+fn aligned_size(value: u32, alignment: u32) -> u32 {
+    (value + alignment - 1) & !(alignment - 1)
 }
