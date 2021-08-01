@@ -175,6 +175,8 @@ fn main() {
     };
 
     let ray_tracing = ash::extensions::nv::RayTracing::new(&instance, &device);
+    let rt_properties =
+        unsafe { ash::extensions::nv::RayTracing::get_properties(&instance, physical_device) };
 
     let graphics_queue = unsafe { device.get_device_queue(queue_family_index, 0) };
 
@@ -984,40 +986,97 @@ fn main() {
             .expect("Failed to begin recording Command Buffer at beginning!");
     }
 
-    {
-        let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
-            .render_pass(render_pass)
-            .framebuffer(framebuffer)
-            .render_area(vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent,
-            })
-            .clear_values(&[vk::ClearValue {
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
-                },
-            }])
+    let (shader_binding_table_buffer, shader_binding_table_memory) = {
+        let group_count = 3; // Listed in vk::RayTracingPipelineCreateInfoNV
+        let table_size = (rt_properties.shader_group_handle_size * group_count) as u64;
+        let mut table_data: Vec<u8> = vec![0u8; table_size as usize];
+        unsafe {
+            ray_tracing
+                .get_ray_tracing_shader_group_handles(
+                    graphics_pipeline,
+                    0,
+                    group_count,
+                    &mut table_data,
+                )
+                .unwrap();
+        }
+        let table_size = vertex_stride * vertex_count;
+
+        let buffer_create_info = vk::BufferCreateInfo::builder()
+            .size(table_size as u64)
+            .usage(vk::BufferUsageFlags::TRANSFER_SRC)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .build();
 
+        let buffer = unsafe { device.create_buffer(&buffer_create_info, None) }.unwrap();
+
+        let memory_req = unsafe { device.get_buffer_memory_requirements(buffer) };
+
+        let memory_index = get_memory_type_index(
+            device_memory_properties,
+            memory_req.memory_type_bits,
+            vk::MemoryPropertyFlags::HOST_VISIBLE,
+        );
+
+        let allocate_info = vk::MemoryAllocateInfo {
+            allocation_size: memory_req.size,
+            memory_type_index: memory_index,
+            ..Default::default()
+        };
+
+        let memory = unsafe { device.allocate_memory(&allocate_info, None).unwrap() };
+
+        unsafe { device.bind_buffer_memory(buffer, memory, 0) }.unwrap();
+
+        let mapped_ptr =
+            unsafe { device.map_memory(memory, 0, table_size as u64, vk::MemoryMapFlags::empty()) }
+                .unwrap();
+
+        let mut mapped_slice = unsafe {
+            Align::new(
+                mapped_ptr,
+                std::mem::align_of::<u8>() as u64,
+                table_size as u64,
+            )
+        };
+        mapped_slice.copy_from_slice(&table_data);
         unsafe {
-            device.cmd_begin_render_pass(
-                command_buffer,
-                &render_pass_begin_info,
-                vk::SubpassContents::INLINE,
-            );
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                graphics_pipeline,
-            );
-            device.cmd_draw(command_buffer, 3, 1, 0, 0);
-
-            device.cmd_end_render_pass(command_buffer);
-
-            device
-                .end_command_buffer(command_buffer)
-                .expect("Failed to record Command Buffer at Ending!");
+            device.unmap_memory(memory);
         }
+        (buffer, memory)
+    };
+    let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+        .render_pass(render_pass)
+        .framebuffer(framebuffer)
+        .render_area(vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+            extent,
+        })
+        .clear_values(&[vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [0.0, 0.0, 0.0, 1.0],
+            },
+        }])
+        .build();
+
+    unsafe {
+        device.cmd_begin_render_pass(
+            command_buffer,
+            &render_pass_begin_info,
+            vk::SubpassContents::INLINE,
+        );
+        device.cmd_bind_pipeline(
+            command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            graphics_pipeline,
+        );
+        device.cmd_draw(command_buffer, 3, 1, 0, 0);
+
+        device.cmd_end_render_pass(command_buffer);
+
+        device
+            .end_command_buffer(command_buffer)
+            .expect("Failed to record Command Buffer at Ending!");
     }
 
     let fence = {
