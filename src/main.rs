@@ -85,27 +85,26 @@ fn main() {
             .unwrap()
             .unwrap();
 
-    let queue_priorities = [1.0_f32];
-
-    let queue_create_info = vk::DeviceQueueCreateInfo::builder()
-        .queue_family_index(queue_family_index)
-        .queue_priorities(&queue_priorities)
-        .build();
-
-    let mut physical_device_vulkan_memory_model_features =
-        vk::PhysicalDeviceVulkanMemoryModelFeatures::builder()
-            .vulkan_memory_model(true)
+    let device: ash::Device = {
+        let queue_create_info = vk::DeviceQueueCreateInfo::builder()
+            .queue_family_index(queue_family_index)
+            .queue_priorities(&[1.0])
             .build();
 
-    let device_create_info = vk::DeviceCreateInfo::builder()
-        .push_next(&mut physical_device_vulkan_memory_model_features)
-        .queue_create_infos(&[queue_create_info])
-        .enabled_layer_names(validation_layers_ptr.as_slice())
-        .build();
+        let mut physical_device_vulkan_memory_model_features =
+            vk::PhysicalDeviceVulkanMemoryModelFeatures::builder()
+                .vulkan_memory_model(true)
+                .build();
 
-    let device: ash::Device =
+        let device_create_info = vk::DeviceCreateInfo::builder()
+            .push_next(&mut physical_device_vulkan_memory_model_features)
+            .queue_create_infos(&[queue_create_info])
+            .enabled_layer_names(validation_layers_ptr.as_slice())
+            .build();
+
         unsafe { instance.create_device(physical_device, &device_create_info, None) }
-            .expect("Failed to create logical Device!");
+            .expect("Failed to create logical Device!")
+    };
 
     let graphics_queue = unsafe { device.get_device_queue(queue_family_index, 0) };
 
