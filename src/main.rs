@@ -162,12 +162,29 @@ fn main() {
             .runtime_descriptor_array(true)
             .build();
 
+        let mut scalar_block = vk::PhysicalDeviceScalarBlockLayoutFeaturesEXT::builder()
+            .scalar_block_layout(true)
+            .build();
+
+        let mut features2 = vk::PhysicalDeviceFeatures2::default();
+        unsafe {
+            instance
+                .fp_v1_1()
+                .get_physical_device_features2(physical_device, &mut features2)
+        };
+
         let device_create_info = vk::DeviceCreateInfo::builder()
             .push_next(&mut physical_device_vulkan_memory_model_features)
             .push_next(&mut descriptor_indexing)
+            .push_next(&mut scalar_block)
             .queue_create_infos(&[queue_create_info])
             .enabled_layer_names(validation_layers_ptr.as_slice())
-            .enabled_extension_names(&[ash::extensions::nv::RayTracing::name().as_ptr()])
+            .enabled_extension_names(&[
+                ash::extensions::nv::RayTracing::name().as_ptr(),
+                vk::ExtDescriptorIndexingFn::name().as_ptr(),
+                vk::ExtScalarBlockLayoutFn::name().as_ptr(),
+                vk::KhrGetMemoryRequirements2Fn::name().as_ptr(),
+            ])
             .build();
 
         unsafe { instance.create_device(physical_device, &device_create_info, None) }
@@ -214,7 +231,11 @@ fn main() {
             .array_layers(1)
             .samples(vk::SampleCountFlags::TYPE_1)
             .tiling(vk::ImageTiling::OPTIMAL)
-            .usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC)
+            .usage(
+                vk::ImageUsageFlags::COLOR_ATTACHMENT
+                    | vk::ImageUsageFlags::STORAGE
+                    | vk::ImageUsageFlags::TRANSFER_SRC,
+            )
             .build();
 
         unsafe { device.create_image(&image_create_info, None) }.unwrap()
@@ -792,7 +813,7 @@ fn main() {
             .expect("Failed to create render pass!")
     };
 
-    let graphics_pipeline = {
+    let (descriptor_set_layout, graphics_pipeline) = {
         let mut binding_flags = vk::DescriptorSetLayoutBindingFlagsCreateInfoEXT::builder()
             .binding_flags(&[
                 vk::DescriptorBindingFlagsEXT::empty(),
@@ -950,7 +971,7 @@ fn main() {
             device.destroy_shader_module(miss_shader_module, None);
         }
 
-        pipeline
+        (descriptor_set_layout, pipeline)
     };
 
     let framebuffer = {
@@ -1045,38 +1066,229 @@ fn main() {
         }
         (buffer, memory)
     };
-    let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
-        .render_pass(render_pass)
-        .framebuffer(framebuffer)
-        .render_area(vk::Rect2D {
-            offset: vk::Offset2D { x: 0, y: 0 },
-            extent,
-        })
-        .clear_values(&[vk::ClearValue {
-            color: vk::ClearColorValue {
-                float32: [0.0, 0.0, 0.0, 1.0],
-            },
-        }])
+
+    let (color0_buffer, color1_buffer, color2_buffer) = {
+        let color0: [f32; 3] = [1.0, 0.0, 0.0];
+        let color1: [f32; 3] = [0.0, 1.0, 0.0];
+        let color2: [f32; 3] = [0.0, 0.0, 1.0];
+
+        let buffer_size = (std::mem::size_of::<f32>() * 3) as vk::DeviceSize;
+
+        let mut color0_buffer = BufferResource::new(
+            buffer_size,
+            vk::BufferUsageFlags::UNIFORM_BUFFER,
+            vk::MemoryPropertyFlags::HOST_VISIBLE,
+            &device,
+            device_memory_properties,
+        );
+        color0_buffer.store(&color0, &device);
+
+        let mut color1_buffer = BufferResource::new(
+            buffer_size,
+            vk::BufferUsageFlags::UNIFORM_BUFFER,
+            vk::MemoryPropertyFlags::HOST_VISIBLE,
+            &device,
+            device_memory_properties,
+        );
+        color1_buffer.store(&color1, &device);
+
+        let mut color2_buffer = BufferResource::new(
+            buffer_size,
+            vk::BufferUsageFlags::UNIFORM_BUFFER,
+            vk::MemoryPropertyFlags::HOST_VISIBLE,
+            &device,
+            device_memory_properties,
+        );
+        color2_buffer.store(&color2, &device);
+
+        (color0_buffer, color1_buffer, color2_buffer)
+    };
+
+    let descriptor_sizes = [
+        vk::DescriptorPoolSize {
+            ty: vk::DescriptorType::ACCELERATION_STRUCTURE_NV,
+            descriptor_count: 1,
+        },
+        vk::DescriptorPoolSize {
+            ty: vk::DescriptorType::STORAGE_IMAGE,
+            descriptor_count: 1,
+        },
+        vk::DescriptorPoolSize {
+            ty: vk::DescriptorType::UNIFORM_BUFFER,
+            descriptor_count: 3,
+        },
+    ];
+
+    let descriptor_pool_info = vk::DescriptorPoolCreateInfo::builder()
+        .pool_sizes(&descriptor_sizes)
+        .max_sets(1);
+
+    let descriptor_pool =
+        unsafe { device.create_descriptor_pool(&descriptor_pool_info, None) }.unwrap();
+
+    let descriptor_sets = unsafe {
+        device.allocate_descriptor_sets(
+            &vk::DescriptorSetAllocateInfo::builder()
+                .descriptor_pool(descriptor_pool)
+                .set_layouts(&[descriptor_set_layout])
+                .build(),
+        )
+    }
+    .unwrap();
+
+    let descriptor_set = descriptor_sets[0];
+
+    let accel_structs = [top_as];
+    let mut accel_info = vk::WriteDescriptorSetAccelerationStructureNV::builder()
+        .acceleration_structures(&accel_structs)
+        .build();
+
+    let mut accel_write = vk::WriteDescriptorSet::builder()
+        .dst_set(descriptor_set)
+        .dst_binding(0)
+        .dst_array_element(0)
+        .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_NV)
+        .push_next(&mut accel_info)
+        .build();
+
+    // This is only set by the builder for images, buffers, or views; need to set explicitly after
+    accel_write.descriptor_count = 1;
+
+    let image_info = [vk::DescriptorImageInfo::builder()
+        .image_layout(vk::ImageLayout::GENERAL)
+        .image_view(image_view)
+        .build()];
+
+    let image_write = vk::WriteDescriptorSet::builder()
+        .dst_set(descriptor_set)
+        .dst_binding(1)
+        .dst_array_element(0)
+        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+        .image_info(&image_info)
+        .build();
+
+    let buffer0 = color0_buffer.buffer;
+    let buffer1 = color1_buffer.buffer;
+    let buffer2 = color2_buffer.buffer;
+
+    let buffer_info = [
+        vk::DescriptorBufferInfo::builder()
+            .buffer(buffer0)
+            .range(vk::WHOLE_SIZE)
+            .build(),
+        vk::DescriptorBufferInfo::builder()
+            .buffer(buffer1)
+            .range(vk::WHOLE_SIZE)
+            .build(),
+        vk::DescriptorBufferInfo::builder()
+            .buffer(buffer2)
+            .range(vk::WHOLE_SIZE)
+            .build(),
+    ];
+
+    let buffers_write = vk::WriteDescriptorSet::builder()
+        .dst_set(descriptor_set)
+        .dst_binding(2)
+        .dst_array_element(0)
+        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+        .buffer_info(&buffer_info)
         .build();
 
     unsafe {
-        device.cmd_begin_render_pass(
-            command_buffer,
-            &render_pass_begin_info,
-            vk::SubpassContents::INLINE,
-        );
-        device.cmd_bind_pipeline(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            graphics_pipeline,
-        );
-        device.cmd_draw(command_buffer, 3, 1, 0, 0);
+        device.update_descriptor_sets(&[accel_write, image_write, buffers_write], &[]);
+    }
 
-        device.cmd_end_render_pass(command_buffer);
+    {
+        let handle_size = rt_properties.shader_group_handle_size as u64;
 
-        device
-            .end_command_buffer(command_buffer)
-            .expect("Failed to record Command Buffer at Ending!");
+        // |[ raygen shader ]|[ hit shader  ]|[ miss shader ]|
+        // |                 |               |               |
+        // | 0               | 1             | 2             | 3
+
+        let sbt_raygen_buffer = shader_binding_table_buffer;
+        let sbt_raygen_offset = 0;
+
+        let sbt_miss_buffer = shader_binding_table_buffer;
+        let sbt_miss_offset = 2 * handle_size;
+        let sbt_miss_stride = handle_size;
+
+        let sbt_hit_buffer = shader_binding_table_buffer;
+        let sbt_hit_offset = 1 * handle_size;
+        let sbt_hit_stride = handle_size;
+
+        let sbt_call_buffer = vk::Buffer::null();
+        let sbt_call_offset = 0;
+        let sbt_call_stride = 0;
+
+        unsafe {
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::RAY_TRACING_NV,
+                graphics_pipeline,
+            );
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::RAY_TRACING_NV,
+                pipeline_layout,
+                0,
+                &[descriptor_set],
+                &[],
+            );
+            ray_tracing.cmd_trace_rays(
+                command_buffer,
+                sbt_raygen_buffer,
+                sbt_raygen_offset,
+                sbt_miss_buffer,
+                sbt_miss_offset,
+                sbt_miss_stride,
+                sbt_hit_buffer,
+                sbt_hit_offset,
+                sbt_hit_stride,
+                sbt_call_buffer,
+                sbt_call_offset,
+                sbt_call_stride,
+                WIDTH,
+                HEIGHT,
+                1,
+            );
+            device.end_command_buffer(command_buffer).unwrap();
+        }
+
+        /*
+        let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+            .render_pass(render_pass)
+            .framebuffer(framebuffer)
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent,
+            })
+            .clear_values(&[vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 1.0],
+                },
+            }])
+            .build();
+
+        unsafe {
+            device.cmd_begin_render_pass(
+                command_buffer,
+                &render_pass_begin_info,
+                vk::SubpassContents::INLINE,
+            );
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                graphics_pipeline,
+            );
+            device.cmd_draw(command_buffer, 3, 1, 0, 0);
+
+            device.cmd_end_render_pass(command_buffer);
+
+            device
+                .end_command_buffer(command_buffer)
+                .expect("Failed to record Command Buffer at Ending!");
+        }
+        */
     }
 
     let fence = {
@@ -1456,4 +1668,80 @@ pub unsafe extern "system" fn default_vulkan_debug_utils_callback(
     println!("[Debug]{}{}{:?}", severity, types, message);
 
     vk::FALSE
+}
+
+#[derive(Clone)]
+struct BufferResource {
+    buffer: vk::Buffer,
+    memory: vk::DeviceMemory,
+    size: vk::DeviceSize,
+}
+
+impl BufferResource {
+    fn new(
+        size: vk::DeviceSize,
+        usage: vk::BufferUsageFlags,
+        memory_properties: vk::MemoryPropertyFlags,
+        device: &ash::Device,
+        device_memory_properties: vk::PhysicalDeviceMemoryProperties,
+    ) -> Self {
+        unsafe {
+            let buffer_info = vk::BufferCreateInfo::builder()
+                .size(size)
+                .usage(usage)
+                .sharing_mode(vk::SharingMode::EXCLUSIVE)
+                .build();
+
+            let buffer = device.create_buffer(&buffer_info, None).unwrap();
+
+            let memory_req = device.get_buffer_memory_requirements(buffer);
+
+            let memory_index = get_memory_type_index(
+                device_memory_properties,
+                memory_req.memory_type_bits,
+                memory_properties,
+            );
+
+            let allocate_info = vk::MemoryAllocateInfo {
+                allocation_size: memory_req.size,
+                memory_type_index: memory_index,
+                ..Default::default()
+            };
+
+            let memory = device.allocate_memory(&allocate_info, None).unwrap();
+
+            device.bind_buffer_memory(buffer, memory, 0).unwrap();
+
+            BufferResource {
+                buffer,
+                memory,
+                size,
+            }
+        }
+    }
+
+    fn store<T: Copy>(&mut self, data: &[T], device: &ash::Device) {
+        unsafe {
+            let size = (std::mem::size_of::<T>() * data.len()) as u64;
+            let mapped_ptr = self.map(size, device);
+            let mut mapped_slice = Align::new(mapped_ptr, std::mem::align_of::<T>() as u64, size);
+            mapped_slice.copy_from_slice(&data);
+            self.unmap(device);
+        }
+    }
+
+    fn map(&mut self, size: vk::DeviceSize, device: &ash::Device) -> *mut std::ffi::c_void {
+        unsafe {
+            let data: *mut std::ffi::c_void = device
+                .map_memory(self.memory, 0, size, vk::MemoryMapFlags::empty())
+                .unwrap();
+            data
+        }
+    }
+
+    fn unmap(&mut self, device: &ash::Device) {
+        unsafe {
+            device.unmap_memory(self.memory);
+        }
+    }
 }
