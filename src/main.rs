@@ -419,7 +419,7 @@ fn main() {
 
     let dst_image_create_info = vk::ImageCreateInfo::builder()
         .image_type(vk::ImageType::TYPE_2D)
-        .format(vk::Format::R8G8B8A8_UNORM)
+        .format(color_format)
         .extent(
             vk::Extent3D::builder()
                 .width(WIDTH)
@@ -455,14 +455,10 @@ fn main() {
         .command_buffer_count(1)
         .build();
 
-    let copy_cmd = unsafe { device.allocate_command_buffers(&allocate_info) }.unwrap();
+    let copy_cmd = unsafe { device.allocate_command_buffers(&allocate_info) }.unwrap()[0];
     let cmd_begin_info = vk::CommandBufferBeginInfo::builder().build();
 
-    unsafe {
-        device
-            .begin_command_buffer(copy_cmd[0], &cmd_begin_info)
-            .unwrap();
-    }
+    unsafe { device.begin_command_buffer(copy_cmd, &cmd_begin_info) }.unwrap();
 
     let image_barrier = vk::ImageMemoryBarrier::builder()
         .src_access_mask(vk::AccessFlags::empty())
@@ -483,7 +479,7 @@ fn main() {
 
     unsafe {
         device.cmd_pipeline_barrier(
-            copy_cmd[0],
+            copy_cmd,
             vk::PipelineStageFlags::TRANSFER,
             vk::PipelineStageFlags::TRANSFER,
             vk::DependencyFlags::empty(),
@@ -517,7 +513,7 @@ fn main() {
 
     unsafe {
         device.cmd_copy_image(
-            copy_cmd[0],
+            copy_cmd,
             image,
             vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
             dst_image,
@@ -545,7 +541,7 @@ fn main() {
 
     unsafe {
         device.cmd_pipeline_barrier(
-            copy_cmd[0],
+            copy_cmd,
             vk::PipelineStageFlags::TRANSFER,
             vk::PipelineStageFlags::TRANSFER,
             vk::DependencyFlags::empty(),
@@ -562,13 +558,13 @@ fn main() {
         p_wait_semaphores: null(),
         p_wait_dst_stage_mask: null(),
         command_buffer_count: 1,
-        p_command_buffers: &copy_cmd[0],
+        p_command_buffers: &copy_cmd,
         signal_semaphore_count: 0,
         p_signal_semaphores: null(),
     }];
 
     unsafe {
-        device.end_command_buffer(copy_cmd[0]).unwrap();
+        device.end_command_buffer(copy_cmd).unwrap();
 
         device
             .reset_fences(&[fence])
