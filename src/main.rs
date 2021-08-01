@@ -1020,8 +1020,10 @@ fn main() {
         let shader_stages = vec![
             vk::PipelineShaderStageCreateInfo::builder()
                 .stage(vk::ShaderStageFlags::RAYGEN_NV)
-                .module(rgen_shader_module)
-                .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
+                // .module(rgen_shader_module)
+                // .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
+                .module(shader_module)
+                .name(std::ffi::CStr::from_bytes_with_nul(b"main_ray_generation\0").unwrap())
                 .build(),
             vk::PipelineShaderStageCreateInfo::builder()
                 .stage(vk::ShaderStageFlags::CLOSEST_HIT_NV)
