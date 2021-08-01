@@ -39,3 +39,15 @@ pub fn main_vs(
 pub fn main_miss(#[spirv(incoming_ray_payload)] out: &mut Vec3) {
     *out = vec3(1.0, 1.0, 1.0);
 }
+
+#[spirv(closest_hit)]
+pub fn main_closest_hit(
+    #[spirv(incoming_ray_payload)] out: &mut Vec3,
+    #[spirv(instance_id)] id: u32,
+    #[spirv(uniform, descriptor_set = 0, binding = 2)] colors: &[Vec3; 3],
+    #[spirv(hit_attribute)] attribs: &Vec3,
+) {
+    // let barycentrics = vec3(1.0 - attribs.x - attribs.y, attribs.x, attribs.y);
+    // *out = *attribs;
+    *out = colors[id as usize];
+}

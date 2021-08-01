@@ -1025,8 +1025,10 @@ fn main() {
                 .build(),
             vk::PipelineShaderStageCreateInfo::builder()
                 .stage(vk::ShaderStageFlags::CLOSEST_HIT_NV)
-                .module(chit_shader_module)
-                .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
+                // .module(chit_shader_module)
+                // .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
+                .module(shader_module)
+                .name(std::ffi::CStr::from_bytes_with_nul(b"main_closest_hit\0").unwrap())
                 .build(),
             vk::PipelineShaderStageCreateInfo::builder()
                 .stage(vk::ShaderStageFlags::MISS_NV)
@@ -1172,13 +1174,26 @@ fn main() {
         (buffer, memory)
     };
 
-    let (color0_buffer, color1_buffer, color2_buffer) = {
-        let color0: [f32; 3] = [1.0, 0.0, 0.0];
-        let color1: [f32; 3] = [0.0, 1.0, 0.0];
-        let color2: [f32; 3] = [0.0, 0.0, 1.0];
+    let color_buffer = {
+        /*
+        let color0: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
+        let color1: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
+        let color2: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+        */
 
-        let buffer_size = (std::mem::size_of::<f32>() * 3) as vk::DeviceSize;
+        let color: [f32; 12] = [1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0];
 
+        let buffer_size = (std::mem::size_of::<f32>() * 12) as vk::DeviceSize;
+
+        let mut color_buffer = BufferResource::new(
+            buffer_size,
+            vk::BufferUsageFlags::UNIFORM_BUFFER,
+            vk::MemoryPropertyFlags::HOST_VISIBLE,
+            &device,
+            device_memory_properties,
+        );
+        color_buffer.store(&color, &device);
+        /*
         let mut color0_buffer = BufferResource::new(
             buffer_size,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
@@ -1205,8 +1220,9 @@ fn main() {
             device_memory_properties,
         );
         color2_buffer.store(&color2, &device);
+        */
 
-        (color0_buffer, color1_buffer, color2_buffer)
+        color_buffer
     };
 
     let descriptor_sizes = [
@@ -1220,7 +1236,7 @@ fn main() {
         },
         vk::DescriptorPoolSize {
             ty: vk::DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: 3,
+            descriptor_count: 1,
         },
     ];
 
@@ -1232,7 +1248,7 @@ fn main() {
         unsafe { device.create_descriptor_pool(&descriptor_pool_info, None) }.unwrap();
 
     let mut count_allocate_info = vk::DescriptorSetVariableDescriptorCountAllocateInfo::builder()
-        .descriptor_counts(&[3])
+        .descriptor_counts(&[1])
         .build();
 
     let descriptor_sets = unsafe {
@@ -1277,11 +1293,19 @@ fn main() {
         .image_info(&image_info)
         .build();
 
+    let buffer = color_buffer.buffer;
+    /*
     let buffer0 = color0_buffer.buffer;
     let buffer1 = color1_buffer.buffer;
     let buffer2 = color2_buffer.buffer;
+    */
 
     let buffer_info = [
+        vk::DescriptorBufferInfo::builder()
+            .buffer(buffer)
+            .range(vk::WHOLE_SIZE)
+            .build(),
+        /*
         vk::DescriptorBufferInfo::builder()
             .buffer(buffer0)
             .range(vk::WHOLE_SIZE)
@@ -1294,6 +1318,7 @@ fn main() {
             .buffer(buffer2)
             .range(vk::WHOLE_SIZE)
             .build(),
+            */
     ];
 
     let buffers_write = vk::WriteDescriptorSet::builder()
