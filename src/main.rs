@@ -442,76 +442,87 @@ fn main() {
 
     // transfer to host
 
-    let dst_image_create_info = vk::ImageCreateInfo::builder()
-        .image_type(vk::ImageType::TYPE_2D)
-        .format(color_format)
-        .extent(
-            vk::Extent3D::builder()
-                .width(WIDTH)
-                .height(HEIGHT)
-                .depth(1)
-                .build(),
-        )
-        .mip_levels(1)
-        .initial_layout(vk::ImageLayout::UNDEFINED)
-        .array_layers(1)
-        .samples(vk::SampleCountFlags::TYPE_1)
-        .tiling(vk::ImageTiling::LINEAR)
-        .usage(vk::ImageUsageFlags::TRANSFER_DST)
-        .build();
+    let dst_image = {
+        let dst_image_create_info = vk::ImageCreateInfo::builder()
+            .image_type(vk::ImageType::TYPE_2D)
+            .format(color_format)
+            .extent(
+                vk::Extent3D::builder()
+                    .width(WIDTH)
+                    .height(HEIGHT)
+                    .depth(1)
+                    .build(),
+            )
+            .mip_levels(1)
+            .initial_layout(vk::ImageLayout::UNDEFINED)
+            .array_layers(1)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .tiling(vk::ImageTiling::LINEAR)
+            .usage(vk::ImageUsageFlags::TRANSFER_DST)
+            .build();
 
-    let dst_image = unsafe { device.create_image(&dst_image_create_info, None) }.unwrap();
+        unsafe { device.create_image(&dst_image_create_info, None) }.unwrap()
+    };
 
-    let dst_mem_reqs = unsafe { device.get_image_memory_requirements(dst_image) };
-    let dst_mem_alloc_info = vk::MemoryAllocateInfo::builder()
-        .allocation_size(dst_mem_reqs.size)
-        .memory_type_index(get_memory_type_index(
-            device_memory_properties,
-            dst_mem_reqs.memory_type_bits,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        ));
+    let dst_device_memory = {
+        let dst_mem_reqs = unsafe { device.get_image_memory_requirements(dst_image) };
+        let dst_mem_alloc_info = vk::MemoryAllocateInfo::builder()
+            .allocation_size(dst_mem_reqs.size)
+            .memory_type_index(get_memory_type_index(
+                device_memory_properties,
+                dst_mem_reqs.memory_type_bits,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            ));
 
-    let dst_device_memory = unsafe { device.allocate_memory(&dst_mem_alloc_info, None) }.unwrap();
+        unsafe { device.allocate_memory(&dst_mem_alloc_info, None) }.unwrap()
+    };
     unsafe { device.bind_image_memory(dst_image, dst_device_memory, 0) }.unwrap();
 
-    let allocate_info = vk::CommandBufferAllocateInfo::builder()
-        .command_pool(command_pool)
-        .level(vk::CommandBufferLevel::PRIMARY)
-        .command_buffer_count(1)
-        .build();
+    let copy_cmd = {
+        let allocate_info = vk::CommandBufferAllocateInfo::builder()
+            .command_pool(command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1)
+            .build();
 
-    let copy_cmd = unsafe { device.allocate_command_buffers(&allocate_info) }.unwrap()[0];
-    let cmd_begin_info = vk::CommandBufferBeginInfo::builder().build();
+        unsafe { device.allocate_command_buffers(&allocate_info) }.unwrap()[0]
+    };
 
-    unsafe { device.begin_command_buffer(copy_cmd, &cmd_begin_info) }.unwrap();
+    {
+        let cmd_begin_info = vk::CommandBufferBeginInfo::builder().build();
 
-    let image_barrier = vk::ImageMemoryBarrier::builder()
-        .src_access_mask(vk::AccessFlags::empty())
-        .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-        .old_layout(vk::ImageLayout::UNDEFINED)
-        .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-        .image(dst_image)
-        .subresource_range(
-            vk::ImageSubresourceRange::builder()
-                .aspect_mask(vk::ImageAspectFlags::COLOR)
-                .base_mip_level(0)
-                .level_count(1)
-                .base_array_layer(0)
-                .layer_count(1)
-                .build(),
-        )
-        .build();
+        unsafe { device.begin_command_buffer(copy_cmd, &cmd_begin_info) }.unwrap();
+    }
 
-    unsafe {
-        device.cmd_pipeline_barrier(
-            copy_cmd,
-            vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::TRANSFER,
-            vk::DependencyFlags::empty(),
-            &[],
-            &[],
-            &[image_barrier],
-        );
+    {
+        let image_barrier = vk::ImageMemoryBarrier::builder()
+            .src_access_mask(vk::AccessFlags::empty())
+            .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+            .old_layout(vk::ImageLayout::UNDEFINED)
+            .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+            .image(dst_image)
+            .subresource_range(
+                vk::ImageSubresourceRange::builder()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .base_mip_level(0)
+                    .level_count(1)
+                    .base_array_layer(0)
+                    .layer_count(1)
+                    .build(),
+            )
+            .build();
+
+        unsafe {
+            device.cmd_pipeline_barrier(
+                copy_cmd,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[image_barrier],
+            );
+        }
     }
 
     let copy_region = vk::ImageCopy::builder()
