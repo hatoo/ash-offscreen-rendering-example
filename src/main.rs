@@ -3,10 +3,15 @@ use std::{
     ffi::{c_void, CStr, CString},
     fs::File,
     io::Write,
+    path::Path,
     ptr::{self, null},
 };
 
-use ash::{prelude::VkResult, util::Align, vk};
+use ash::{
+    prelude::VkResult,
+    util::{read_spv, Align},
+    vk,
+};
 
 #[repr(C)]
 #[derive(Clone, Debug, Copy)]
@@ -152,8 +157,14 @@ fn main() {
                 .vulkan_memory_model(true)
                 .build();
 
+        let mut descriptor_indexing = vk::PhysicalDeviceDescriptorIndexingFeaturesEXT::builder()
+            .descriptor_binding_variable_descriptor_count(true)
+            .runtime_descriptor_array(true)
+            .build();
+
         let device_create_info = vk::DeviceCreateInfo::builder()
             .push_next(&mut physical_device_vulkan_memory_model_features)
+            .push_next(&mut descriptor_indexing)
             .queue_create_infos(&[queue_create_info])
             .enabled_layer_names(validation_layers_ptr.as_slice())
             .enabled_extension_names(&[ash::extensions::nv::RayTracing::name().as_ptr()])
@@ -780,129 +791,164 @@ fn main() {
     };
 
     let graphics_pipeline = {
-        const SHADER: &[u8] = include_bytes!(env!("shader.spv"));
-
-        let shader_module = unsafe { create_shader_module(&device, SHADER).unwrap() };
-
-        let main_vs = CString::new("main_vs").unwrap();
-        let main_fs = CString::new("main_fs").unwrap();
-
-        let shader_stages = [
-            vk::PipelineShaderStageCreateInfo::builder()
-                .module(shader_module)
-                .name(main_vs.as_c_str())
-                .stage(vk::ShaderStageFlags::VERTEX)
-                .build(),
-            vk::PipelineShaderStageCreateInfo::builder()
-                .module(shader_module)
-                .name(main_fs.as_c_str())
-                .stage(vk::ShaderStageFlags::FRAGMENT)
-                .build(),
-        ];
-        let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo::default();
-        let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo::builder()
-            .primitive_restart_enable(false)
-            .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
+        let mut binding_flags = vk::DescriptorSetLayoutBindingFlagsCreateInfoEXT::builder()
+            .binding_flags(&[
+                vk::DescriptorBindingFlagsEXT::empty(),
+                vk::DescriptorBindingFlagsEXT::empty(),
+                vk::DescriptorBindingFlagsEXT::VARIABLE_DESCRIPTOR_COUNT,
+            ])
             .build();
 
-        let viewport_state_create_info = vk::PipelineViewportStateCreateInfo::builder()
-            .scissors(&[vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent,
-            }])
-            .viewports(&[vk::Viewport {
-                x: 0.0,
-                y: 0.0,
-                width: extent.width as f32,
-                height: extent.height as f32,
-                min_depth: 0.0,
-                max_depth: 1.0,
-            }])
-            .build();
-
-        let rasterization_statue_create_info = vk::PipelineRasterizationStateCreateInfo::builder()
-            .depth_clamp_enable(false)
-            .cull_mode(vk::CullModeFlags::BACK)
-            .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
-            .line_width(1.0)
-            .polygon_mode(vk::PolygonMode::FILL)
-            .rasterizer_discard_enable(false)
-            .depth_bias_enable(false)
-            .build();
-
-        let multisample_state_create_info = vk::PipelineMultisampleStateCreateInfo::builder()
-            .rasterization_samples(vk::SampleCountFlags::TYPE_1)
-            .sample_shading_enable(false)
-            .min_sample_shading(0.0)
-            .alpha_to_coverage_enable(false)
-            .alpha_to_coverage_enable(false)
-            .build();
-
-        let stencil_state = vk::StencilOpState {
-            fail_op: vk::StencilOp::KEEP,
-            pass_op: vk::StencilOp::KEEP,
-            depth_fail_op: vk::StencilOp::KEEP,
-            compare_op: vk::CompareOp::ALWAYS,
-            compare_mask: 0,
-            write_mask: 0,
-            reference: 0,
-        };
-
-        let depth_state_create_info = vk::PipelineDepthStencilStateCreateInfo::builder()
-            .depth_test_enable(false)
-            .depth_write_enable(false)
-            .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL)
-            .depth_bounds_test_enable(false)
-            .stencil_test_enable(false)
-            .front(stencil_state)
-            .back(stencil_state)
-            .max_depth_bounds(1.0)
-            .min_depth_bounds(0.0)
-            .build();
-
-        let color_blend_attachment_states = [vk::PipelineColorBlendAttachmentState {
-            blend_enable: vk::FALSE,
-            color_write_mask: vk::ColorComponentFlags::all(),
-            src_color_blend_factor: vk::BlendFactor::ONE,
-            dst_color_blend_factor: vk::BlendFactor::ZERO,
-            color_blend_op: vk::BlendOp::ADD,
-            src_alpha_blend_factor: vk::BlendFactor::ONE,
-            dst_alpha_blend_factor: vk::BlendFactor::ZERO,
-            alpha_blend_op: vk::BlendOp::ADD,
-        }];
-
-        let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
-            .attachments(&color_blend_attachment_states)
-            .build();
-        let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo::builder()
-            .stages(&shader_stages)
-            .vertex_input_state(&vertex_input_state_create_info)
-            .input_assembly_state(&vertex_input_assembly_state_info)
-            .viewport_state(&viewport_state_create_info)
-            .rasterization_state(&rasterization_statue_create_info)
-            .multisample_state(&multisample_state_create_info)
-            .depth_stencil_state(&depth_state_create_info)
-            .color_blend_state(&color_blend_state)
-            .layout(pipeline_layout)
-            .render_pass(render_pass)
-            .subpass(0)
-            .base_pipeline_index(-1)
-            .build()];
-
-        let graphics_pipeline = unsafe {
-            device.create_graphics_pipelines(
-                vk::PipelineCache::null(),
-                &graphic_pipeline_create_infos,
+        let descriptor_set_layout = unsafe {
+            device.create_descriptor_set_layout(
+                &vk::DescriptorSetLayoutCreateInfo::builder()
+                    .bindings(&[
+                        vk::DescriptorSetLayoutBinding::builder()
+                            .descriptor_count(1)
+                            .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_NV)
+                            .stage_flags(vk::ShaderStageFlags::RAYGEN_NV)
+                            .binding(0)
+                            .build(),
+                        vk::DescriptorSetLayoutBinding::builder()
+                            .descriptor_count(1)
+                            .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                            .stage_flags(vk::ShaderStageFlags::RAYGEN_NV)
+                            .binding(1)
+                            .build(),
+                        vk::DescriptorSetLayoutBinding::builder()
+                            .descriptor_count(3)
+                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                            .stage_flags(vk::ShaderStageFlags::CLOSEST_HIT_NV)
+                            .binding(2)
+                            .build(),
+                    ])
+                    .push_next(&mut binding_flags)
+                    .build(),
                 None,
             )
         }
-        .expect("Failed to create Graphics Pipeline!.")[0];
+        .unwrap();
+
+        let (rgen_shader_module, chit_shader_module, miss_shader_module) = {
+            let use_lib = false;
+            let use_hlsl = true;
+            let use_bindless = true;
+            let lang = if use_hlsl { "hlsl_" } else { "glsl_" };
+
+            let variant = if use_bindless { "bindless_" } else { "" };
+
+            let rgen_path = format!("shaders/compiled/triangle.{}rgen.spv", lang);
+            let rgen_path = Path::new(&rgen_path);
+
+            let rchit_path = format!("shaders/compiled/triangle.{}{}rchit.spv", lang, variant);
+            let rchit_path = Path::new(&rchit_path);
+
+            let rmiss_path = format!("shaders/compiled/triangle.{}rmiss.spv", lang);
+            let rmiss_path = Path::new(&rmiss_path);
+
+            let mut rgen_file = File::open(&rgen_path)
+                .expect(&format!("Could not open rgen file: {:?}", rgen_path));
+            let mut rchit_file = File::open(&rchit_path)
+                .expect(&format!("Could not open rchit file: {:?}", rchit_path));
+            let mut rmiss_file = File::open(&rmiss_path)
+                .expect(&format!("Could not open rmiss file: {:?}", rmiss_path));
+
+            let rgen_code = read_spv(&mut rgen_file)
+                .expect(&format!("Could not load rgen file: {:?}", rgen_path));
+            let rgen_shader_info = vk::ShaderModuleCreateInfo::builder().code(&rgen_code);
+            let rgen_shader_module =
+                unsafe { device.create_shader_module(&rgen_shader_info, None) }
+                    .expect("Failed to create rgen shader module");
+
+            let rchit_code = read_spv(&mut rchit_file)
+                .expect(&format!("Could not load rchit file: {:?}", rchit_file));
+            let rchit_shader_info = vk::ShaderModuleCreateInfo::builder().code(&rchit_code);
+            let chit_shader_module =
+                unsafe { device.create_shader_module(&rchit_shader_info, None) }
+                    .expect("Failed to create rchit shader module");
+
+            let rmiss_code = read_spv(&mut rmiss_file)
+                .expect(&format!("Could not load rmiss file: {:?}", rmiss_file));
+            let rmiss_shader_info = vk::ShaderModuleCreateInfo::builder().code(&rmiss_code);
+            let miss_shader_module =
+                unsafe { device.create_shader_module(&rmiss_shader_info, None) }
+                    .expect("Failed to create rmiss shader module");
+
+            (rgen_shader_module, chit_shader_module, miss_shader_module)
+        };
+
+        let layouts = vec![descriptor_set_layout];
+        let layout_create_info = vk::PipelineLayoutCreateInfo::builder().set_layouts(&layouts);
+
+        let pipeline_layout =
+            unsafe { device.create_pipeline_layout(&layout_create_info, None) }.unwrap();
+
+        let shader_groups = vec![
+            // group0 = [ raygen ]
+            vk::RayTracingShaderGroupCreateInfoNV::builder()
+                .ty(vk::RayTracingShaderGroupTypeNV::GENERAL)
+                .general_shader(0)
+                .closest_hit_shader(vk::SHADER_UNUSED_NV)
+                .any_hit_shader(vk::SHADER_UNUSED_NV)
+                .intersection_shader(vk::SHADER_UNUSED_NV)
+                .build(),
+            // group1 = [ chit ]
+            vk::RayTracingShaderGroupCreateInfoNV::builder()
+                .ty(vk::RayTracingShaderGroupTypeNV::TRIANGLES_HIT_GROUP)
+                .general_shader(vk::SHADER_UNUSED_NV)
+                .closest_hit_shader(1)
+                .any_hit_shader(vk::SHADER_UNUSED_NV)
+                .intersection_shader(vk::SHADER_UNUSED_NV)
+                .build(),
+            // group2 = [ miss ]
+            vk::RayTracingShaderGroupCreateInfoNV::builder()
+                .ty(vk::RayTracingShaderGroupTypeNV::GENERAL)
+                .general_shader(2)
+                .closest_hit_shader(vk::SHADER_UNUSED_NV)
+                .any_hit_shader(vk::SHADER_UNUSED_NV)
+                .intersection_shader(vk::SHADER_UNUSED_NV)
+                .build(),
+        ];
+
+        let shader_stages = vec![
+            vk::PipelineShaderStageCreateInfo::builder()
+                .stage(vk::ShaderStageFlags::RAYGEN_NV)
+                .module(rgen_shader_module)
+                .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
+                .build(),
+            vk::PipelineShaderStageCreateInfo::builder()
+                .stage(vk::ShaderStageFlags::CLOSEST_HIT_NV)
+                .module(chit_shader_module)
+                .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
+                .build(),
+            vk::PipelineShaderStageCreateInfo::builder()
+                .stage(vk::ShaderStageFlags::MISS_NV)
+                .module(miss_shader_module)
+                .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
+                .build(),
+        ];
+
+        let pipeline = unsafe {
+            ray_tracing.create_ray_tracing_pipelines(
+                vk::PipelineCache::null(),
+                &[vk::RayTracingPipelineCreateInfoNV::builder()
+                    .stages(&shader_stages)
+                    .groups(&shader_groups)
+                    .max_recursion_depth(1)
+                    .layout(pipeline_layout)
+                    .build()],
+                None,
+            )
+        }
+        .unwrap()[0];
 
         unsafe {
-            device.destroy_shader_module(shader_module, None);
+            device.destroy_shader_module(rgen_shader_module, None);
+            device.destroy_shader_module(chit_shader_module, None);
+            device.destroy_shader_module(miss_shader_module, None);
         }
 
-        graphics_pipeline
+        pipeline
     };
 
     let framebuffer = {
