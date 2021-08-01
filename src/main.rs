@@ -17,6 +17,9 @@ fn main() {
     const ENABLE_VALIDATION_LAYER: bool = cfg!(debug_assertions);
     const WIDTH: u32 = 800;
     const HEIGHT: u32 = 600;
+    const COLOR_FORMAT: vk::Format = vk::Format::R8G8B8A8_UNORM;
+
+    let extent = vk::Extent2D::builder().width(WIDTH).height(HEIGHT).build();
 
     let validation_layers: Vec<CString> = if ENABLE_VALIDATION_LAYER {
         vec![CString::new("VK_LAYER_KHRONOS_validation").unwrap()]
@@ -115,15 +118,13 @@ fn main() {
             .expect("Failed to create pipeline layout!")
     };
 
-    let color_format = vk::Format::R8G8B8A8_UNORM;
-
     let device_memory_properties =
         unsafe { instance.get_physical_device_memory_properties(physical_device) };
 
     let image = {
         let image_create_info = vk::ImageCreateInfo::builder()
             .image_type(vk::ImageType::TYPE_2D)
-            .format(color_format)
+            .format(COLOR_FORMAT)
             .extent(
                 vk::Extent3D::builder()
                     .width(WIDTH)
@@ -159,7 +160,7 @@ fn main() {
     let image_view = {
         let image_view_create_info = vk::ImageViewCreateInfo::builder()
             .view_type(vk::ImageViewType::TYPE_2D)
-            .format(color_format)
+            .format(COLOR_FORMAT)
             .subresource_range(vk::ImageSubresourceRange {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
                 base_mip_level: 0,
@@ -178,7 +179,7 @@ fn main() {
     let render_pass = {
         let color_attachment = vk::AttachmentDescription {
             flags: vk::AttachmentDescriptionFlags::empty(),
-            format: color_format,
+            format: COLOR_FORMAT,
             samples: vk::SampleCountFlags::TYPE_1,
             load_op: vk::AttachmentLoadOp::CLEAR,
             store_op: vk::AttachmentStoreOp::STORE,
@@ -206,8 +207,6 @@ fn main() {
         unsafe { device.create_render_pass(&renderpass_create_info, None) }
             .expect("Failed to create render pass!")
     };
-
-    let extent = vk::Extent2D::builder().width(WIDTH).height(HEIGHT).build();
 
     let graphics_pipeline = {
         const SHADER: &[u8] = include_bytes!(env!("shader.spv"));
@@ -445,7 +444,7 @@ fn main() {
     let dst_image = {
         let dst_image_create_info = vk::ImageCreateInfo::builder()
             .image_type(vk::ImageType::TYPE_2D)
-            .format(color_format)
+            .format(COLOR_FORMAT)
             .extent(
                 vk::Extent3D::builder()
                     .width(WIDTH)
