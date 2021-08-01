@@ -206,12 +206,14 @@ fn main() {
             .expect("Failed to create Command Pool!")
     };
 
+    /*
     let pipeline_layout = {
         let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default();
 
         unsafe { device.create_pipeline_layout(&pipeline_layout_create_info, None) }
             .expect("Failed to create pipeline layout!")
     };
+    */
 
     let device_memory_properties =
         unsafe { instance.get_physical_device_memory_properties(physical_device) };
@@ -813,7 +815,7 @@ fn main() {
             .expect("Failed to create render pass!")
     };
 
-    let (descriptor_set_layout, graphics_pipeline) = {
+    let (descriptor_set_layout, graphics_pipeline, pipeline_layout) = {
         let mut binding_flags = vk::DescriptorSetLayoutBindingFlagsCreateInfoEXT::builder()
             .binding_flags(&[
                 vk::DescriptorBindingFlagsEXT::empty(),
@@ -971,7 +973,7 @@ fn main() {
             device.destroy_shader_module(miss_shader_module, None);
         }
 
-        (descriptor_set_layout, pipeline)
+        (descriptor_set_layout, pipeline, pipeline_layout)
     };
 
     let framebuffer = {
@@ -1253,42 +1255,6 @@ fn main() {
             );
             device.end_command_buffer(command_buffer).unwrap();
         }
-
-        /*
-        let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
-            .render_pass(render_pass)
-            .framebuffer(framebuffer)
-            .render_area(vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent,
-            })
-            .clear_values(&[vk::ClearValue {
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
-                },
-            }])
-            .build();
-
-        unsafe {
-            device.cmd_begin_render_pass(
-                command_buffer,
-                &render_pass_begin_info,
-                vk::SubpassContents::INLINE,
-            );
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                graphics_pipeline,
-            );
-            device.cmd_draw(command_buffer, 3, 1, 0, 0);
-
-            device.cmd_end_render_pass(command_buffer);
-
-            device
-                .end_command_buffer(command_buffer)
-                .expect("Failed to record Command Buffer at Ending!");
-        }
-        */
     }
 
     let fence = {
