@@ -348,84 +348,96 @@ fn main() {
             .expect("Failed to create Framebuffer!")
     };
 
-    let command_pool_create_info = vk::CommandPoolCreateInfo::builder()
-        .queue_family_index(queue_family_index)
-        .build();
+    let command_pool = {
+        let command_pool_create_info = vk::CommandPoolCreateInfo::builder()
+            .queue_family_index(queue_family_index)
+            .build();
 
-    let command_pool = unsafe { device.create_command_pool(&command_pool_create_info, None) }
-        .expect("Failed to create Command Pool!");
+        unsafe { device.create_command_pool(&command_pool_create_info, None) }
+            .expect("Failed to create Command Pool!")
+    };
 
-    let command_buffer_allocate_info = vk::CommandBufferAllocateInfo::builder()
-        .command_buffer_count(1)
-        .command_pool(command_pool)
-        .level(vk::CommandBufferLevel::PRIMARY)
-        .build();
+    let command_buffer = {
+        let command_buffer_allocate_info = vk::CommandBufferAllocateInfo::builder()
+            .command_buffer_count(1)
+            .command_pool(command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .build();
 
-    let command_buffer = unsafe { device.allocate_command_buffers(&command_buffer_allocate_info) }
-        .expect("Failed to allocate Command Buffers!")[0];
+        unsafe { device.allocate_command_buffers(&command_buffer_allocate_info) }
+            .expect("Failed to allocate Command Buffers!")[0]
+    };
 
-    let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
-        .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE)
-        .build();
+    {
+        let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
+            .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE)
+            .build();
 
-    unsafe { device.begin_command_buffer(command_buffer, &command_buffer_begin_info) }
-        .expect("Failed to begin recording Command Buffer at beginning!");
-
-    let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
-        .render_pass(render_pass)
-        .framebuffer(framebuffer)
-        .render_area(vk::Rect2D {
-            offset: vk::Offset2D { x: 0, y: 0 },
-            extent,
-        })
-        .clear_values(&[vk::ClearValue {
-            color: vk::ClearColorValue {
-                float32: [0.0, 0.0, 0.0, 1.0],
-            },
-        }])
-        .build();
-
-    unsafe {
-        device.cmd_begin_render_pass(
-            command_buffer,
-            &render_pass_begin_info,
-            vk::SubpassContents::INLINE,
-        );
-        device.cmd_bind_pipeline(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            graphics_pipeline,
-        );
-        device.cmd_draw(command_buffer, 3, 1, 0, 0);
-
-        device.cmd_end_render_pass(command_buffer);
-
-        device
-            .end_command_buffer(command_buffer)
-            .expect("Failed to record Command Buffer at Ending!");
+        unsafe { device.begin_command_buffer(command_buffer, &command_buffer_begin_info) }
+            .expect("Failed to begin recording Command Buffer at beginning!");
     }
 
-    let fence_create_info = vk::FenceCreateInfo::builder()
-        .flags(vk::FenceCreateFlags::SIGNALED)
-        .build();
+    {
+        let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+            .render_pass(render_pass)
+            .framebuffer(framebuffer)
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent,
+            })
+            .clear_values(&[vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 1.0],
+                },
+            }])
+            .build();
 
-    let fence = unsafe { device.create_fence(&fence_create_info, None) }
-        .expect("Failed to create Fence Object!");
+        unsafe {
+            device.cmd_begin_render_pass(
+                command_buffer,
+                &render_pass_begin_info,
+                vk::SubpassContents::INLINE,
+            );
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                graphics_pipeline,
+            );
+            device.cmd_draw(command_buffer, 3, 1, 0, 0);
 
-    let submit_infos = [vk::SubmitInfo::builder()
-        .command_buffers(&[command_buffer])
-        .build()];
+            device.cmd_end_render_pass(command_buffer);
 
-    unsafe {
-        device
-            .reset_fences(&[fence])
-            .expect("Failed to reset Fence!");
+            device
+                .end_command_buffer(command_buffer)
+                .expect("Failed to record Command Buffer at Ending!");
+        }
+    }
 
-        device
-            .queue_submit(graphics_queue, &submit_infos, fence)
-            .expect("Failed to execute queue submit.");
+    let fence = {
+        let fence_create_info = vk::FenceCreateInfo::builder()
+            .flags(vk::FenceCreateFlags::SIGNALED)
+            .build();
 
-        device.wait_for_fences(&[fence], true, u64::MAX).unwrap();
+        unsafe { device.create_fence(&fence_create_info, None) }
+            .expect("Failed to create Fence Object!")
+    };
+
+    {
+        let submit_infos = [vk::SubmitInfo::builder()
+            .command_buffers(&[command_buffer])
+            .build()];
+
+        unsafe {
+            device
+                .reset_fences(&[fence])
+                .expect("Failed to reset Fence!");
+
+            device
+                .queue_submit(graphics_queue, &submit_infos, fence)
+                .expect("Failed to execute queue submit.");
+
+            device.wait_for_fences(&[fence], true, u64::MAX).unwrap();
+        }
     }
 
     // transfer to host
