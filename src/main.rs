@@ -101,11 +101,9 @@ fn main() {
         .enabled_layer_names(validation_layers_ptr.as_slice())
         .build();
 
-    let device: ash::Device = unsafe {
-        instance
-            .create_device(physical_device, &device_create_info, None)
-            .expect("Failed to create logical Device!")
-    };
+    let device: ash::Device =
+        unsafe { instance.create_device(physical_device, &device_create_info, None) }
+            .expect("Failed to create logical Device!");
 
     let graphics_queue = unsafe { device.get_device_queue(queue_family_index, 0) };
 
@@ -283,95 +281,58 @@ fn main() {
         layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
     };
 
-    let subpass = vk::SubpassDescription {
-        flags: vk::SubpassDescriptionFlags::empty(),
-        pipeline_bind_point: vk::PipelineBindPoint::GRAPHICS,
-        input_attachment_count: 0,
-        p_input_attachments: ptr::null(),
-        color_attachment_count: 1,
-        p_color_attachments: &color_attachment_ref,
-        p_resolve_attachments: ptr::null(),
-        p_depth_stencil_attachment: ptr::null(),
-        preserve_attachment_count: 0,
-        p_preserve_attachments: ptr::null(),
-    };
+    let subpass = vk::SubpassDescription::builder()
+        .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+        .color_attachments(&[color_attachment_ref])
+        .build();
 
-    let render_pass_attachments = [color_attachment];
+    let renderpass_create_info = vk::RenderPassCreateInfo::builder()
+        .attachments(&[color_attachment])
+        .subpasses(&[subpass])
+        .build();
 
-    let renderpass_create_info = vk::RenderPassCreateInfo {
-        s_type: vk::StructureType::RENDER_PASS_CREATE_INFO,
-        flags: vk::RenderPassCreateFlags::empty(),
-        p_next: ptr::null(),
-        attachment_count: render_pass_attachments.len() as u32,
-        p_attachments: render_pass_attachments.as_ptr(),
-        subpass_count: 1,
-        p_subpasses: &subpass,
-        dependency_count: 0,
-        p_dependencies: ptr::null(),
-    };
+    let render_pass = unsafe { device.create_render_pass(&renderpass_create_info, None) }
+        .expect("Failed to create render pass!");
 
-    let render_pass = unsafe {
-        device
-            .create_render_pass(&renderpass_create_info, None)
-            .expect("Failed to create render pass!")
-    };
-
-    let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo {
-        s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
-        p_next: ptr::null(),
-        flags: vk::PipelineCreateFlags::empty(),
-        stage_count: shader_stages.len() as u32,
-        p_stages: shader_stages.as_ptr(),
-        p_vertex_input_state: &vertex_input_state_create_info,
-        p_input_assembly_state: &vertex_input_assembly_state_info,
-        p_tessellation_state: ptr::null(),
-        p_viewport_state: &viewport_state_create_info,
-        p_rasterization_state: &rasterization_statue_create_info,
-        p_multisample_state: &multisample_state_create_info,
-        p_depth_stencil_state: &depth_state_create_info,
-        p_color_blend_state: &color_blend_state,
-        p_dynamic_state: ptr::null(),
-        layout: pipeline_layout,
-        render_pass,
-        subpass: 0,
-        base_pipeline_handle: vk::Pipeline::null(),
-        base_pipeline_index: -1,
-    }];
+    let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo::builder()
+        .stages(&shader_stages)
+        .vertex_input_state(&vertex_input_state_create_info)
+        .input_assembly_state(&vertex_input_assembly_state_info)
+        .viewport_state(&viewport_state_create_info)
+        .rasterization_state(&rasterization_statue_create_info)
+        .multisample_state(&multisample_state_create_info)
+        .depth_stencil_state(&depth_state_create_info)
+        .color_blend_state(&color_blend_state)
+        .layout(pipeline_layout)
+        .render_pass(render_pass)
+        .subpass(0)
+        .base_pipeline_index(-1)
+        .build()];
 
     let graphics_pipeline = unsafe {
-        device
-            .create_graphics_pipelines(
-                vk::PipelineCache::null(),
-                &graphic_pipeline_create_infos,
-                None,
-            )
-            .expect("Failed to create Graphics Pipeline!.")
-    }[0];
+        device.create_graphics_pipelines(
+            vk::PipelineCache::null(),
+            &graphic_pipeline_create_infos,
+            None,
+        )
+    }
+    .expect("Failed to create Graphics Pipeline!.")[0];
 
     unsafe {
         device.destroy_shader_module(shader_module, None);
     }
 
     let framebuffer = {
-        let attachments = [image_view];
+        let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
+            .render_pass(render_pass)
+            .attachments(&[image_view])
+            .width(WIDTH)
+            .height(HEIGHT)
+            .layers(1)
+            .build();
 
-        let framebuffer_create_info = vk::FramebufferCreateInfo {
-            s_type: vk::StructureType::FRAMEBUFFER_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::FramebufferCreateFlags::empty(),
-            render_pass,
-            attachment_count: attachments.len() as u32,
-            p_attachments: attachments.as_ptr(),
-            width: extent.width,
-            height: extent.height,
-            layers: 1,
-        };
-
-        unsafe {
-            device
-                .create_framebuffer(&framebuffer_create_info, None)
-                .expect("Failed to create Framebuffer!")
-        }
+        unsafe { device.create_framebuffer(&framebuffer_create_info, None) }
+            .expect("Failed to create Framebuffer!")
     };
 
     let command_pool_create_info = vk::CommandPoolCreateInfo {
