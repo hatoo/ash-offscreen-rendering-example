@@ -628,13 +628,17 @@ fn main() {
     unsafe {
         device.destroy_command_pool(command_pool, None);
     }
+
     unsafe { device.destroy_framebuffer(framebuffer, None) };
+
     unsafe {
         device.destroy_pipeline(graphics_pipeline, None);
     }
+
     unsafe {
         device.destroy_pipeline_layout(pipeline_layout, None);
     }
+
     unsafe {
         device.destroy_render_pass(render_pass, None);
     }
