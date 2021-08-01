@@ -206,46 +206,52 @@ fn main() {
         .attachments(&color_blend_attachment_states)
         .build();
 
-    let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default();
+    let pipeline_layout = {
+        let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default();
 
-    let pipeline_layout =
         unsafe { device.create_pipeline_layout(&pipeline_layout_create_info, None) }
-            .expect("Failed to create pipeline layout!");
+            .expect("Failed to create pipeline layout!")
+    };
 
     let color_format = vk::Format::R8G8B8A8_UNORM;
-
-    let image_create_info = vk::ImageCreateInfo::builder()
-        .image_type(vk::ImageType::TYPE_2D)
-        .format(color_format)
-        .extent(
-            vk::Extent3D::builder()
-                .width(WIDTH)
-                .height(HEIGHT)
-                .depth(1)
-                .build(),
-        )
-        .mip_levels(1)
-        .array_layers(1)
-        .samples(vk::SampleCountFlags::TYPE_1)
-        .tiling(vk::ImageTiling::OPTIMAL)
-        .usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC)
-        .build();
 
     let device_memory_properties =
         unsafe { instance.get_physical_device_memory_properties(physical_device) };
 
-    let image = unsafe { device.create_image(&image_create_info, None) }.unwrap();
+    let image = {
+        let image_create_info = vk::ImageCreateInfo::builder()
+            .image_type(vk::ImageType::TYPE_2D)
+            .format(color_format)
+            .extent(
+                vk::Extent3D::builder()
+                    .width(WIDTH)
+                    .height(HEIGHT)
+                    .depth(1)
+                    .build(),
+            )
+            .mip_levels(1)
+            .array_layers(1)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .tiling(vk::ImageTiling::OPTIMAL)
+            .usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC)
+            .build();
 
-    let mem_reqs = unsafe { device.get_image_memory_requirements(image) };
-    let mem_alloc_info = vk::MemoryAllocateInfo::builder()
-        .allocation_size(mem_reqs.size)
-        .memory_type_index(get_memory_type_index(
-            device_memory_properties,
-            mem_reqs.memory_type_bits,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        ));
+        unsafe { device.create_image(&image_create_info, None) }.unwrap()
+    };
 
-    let device_memory = unsafe { device.allocate_memory(&mem_alloc_info, None) }.unwrap();
+    let device_memory = {
+        let mem_reqs = unsafe { device.get_image_memory_requirements(image) };
+        let mem_alloc_info = vk::MemoryAllocateInfo::builder()
+            .allocation_size(mem_reqs.size)
+            .memory_type_index(get_memory_type_index(
+                device_memory_properties,
+                mem_reqs.memory_type_bits,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            ));
+
+        unsafe { device.allocate_memory(&mem_alloc_info, None) }.unwrap()
+    };
+
     unsafe { device.bind_image_memory(image, device_memory, 0) }.unwrap();
 
     let image_view_create_info = vk::ImageViewCreateInfo::builder()
@@ -265,35 +271,37 @@ fn main() {
 
     // render pass
 
-    let color_attachment = vk::AttachmentDescription {
-        flags: vk::AttachmentDescriptionFlags::empty(),
-        format: color_format,
-        samples: vk::SampleCountFlags::TYPE_1,
-        load_op: vk::AttachmentLoadOp::CLEAR,
-        store_op: vk::AttachmentStoreOp::STORE,
-        stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
-        stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
-        initial_layout: vk::ImageLayout::UNDEFINED,
-        final_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+    let render_pass = {
+        let color_attachment = vk::AttachmentDescription {
+            flags: vk::AttachmentDescriptionFlags::empty(),
+            format: color_format,
+            samples: vk::SampleCountFlags::TYPE_1,
+            load_op: vk::AttachmentLoadOp::CLEAR,
+            store_op: vk::AttachmentStoreOp::STORE,
+            stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+            stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+            initial_layout: vk::ImageLayout::UNDEFINED,
+            final_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+        };
+
+        let color_attachment_ref = vk::AttachmentReference {
+            attachment: 0,
+            layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        };
+
+        let subpass = vk::SubpassDescription::builder()
+            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+            .color_attachments(&[color_attachment_ref])
+            .build();
+
+        let renderpass_create_info = vk::RenderPassCreateInfo::builder()
+            .attachments(&[color_attachment])
+            .subpasses(&[subpass])
+            .build();
+
+        unsafe { device.create_render_pass(&renderpass_create_info, None) }
+            .expect("Failed to create render pass!")
     };
-
-    let color_attachment_ref = vk::AttachmentReference {
-        attachment: 0,
-        layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-    };
-
-    let subpass = vk::SubpassDescription::builder()
-        .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-        .color_attachments(&[color_attachment_ref])
-        .build();
-
-    let renderpass_create_info = vk::RenderPassCreateInfo::builder()
-        .attachments(&[color_attachment])
-        .subpasses(&[subpass])
-        .build();
-
-    let render_pass = unsafe { device.create_render_pass(&renderpass_create_info, None) }
-        .expect("Failed to create render pass!");
 
     let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo::builder()
         .stages(&shader_stages)
@@ -310,14 +318,16 @@ fn main() {
         .base_pipeline_index(-1)
         .build()];
 
-    let graphics_pipeline = unsafe {
-        device.create_graphics_pipelines(
-            vk::PipelineCache::null(),
-            &graphic_pipeline_create_infos,
-            None,
-        )
-    }
-    .expect("Failed to create Graphics Pipeline!.")[0];
+    let graphics_pipeline = {
+        unsafe {
+            device.create_graphics_pipelines(
+                vk::PipelineCache::null(),
+                &graphic_pipeline_create_infos,
+                None,
+            )
+        }
+        .expect("Failed to create Graphics Pipeline!.")[0]
+    };
 
     unsafe {
         device.destroy_shader_module(shader_module, None);
