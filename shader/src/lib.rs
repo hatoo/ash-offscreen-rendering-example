@@ -36,6 +36,6 @@ pub fn main_vs(
 }
 
 #[spirv(miss)]
-pub fn main_miss(#[spirv(ray_payload)] out: &mut Vec3) {
-    *out = vec3(1.0, 0.0, 0.0);
+pub fn main_miss(#[spirv(incoming_ray_payload)] out: &mut Vec3) {
+    *out = vec3(1.0, 1.0, 1.0);
 }

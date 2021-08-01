@@ -932,6 +932,10 @@ fn main() {
         }
         .unwrap();
 
+        const SHADER: &[u8] = include_bytes!(env!("shader.spv"));
+
+        let shader_module = unsafe { create_shader_module(&device, SHADER).unwrap() };
+
         let (rgen_shader_module, chit_shader_module, miss_shader_module) = {
             let use_lib = false;
             let use_hlsl = true;
@@ -1026,8 +1030,10 @@ fn main() {
                 .build(),
             vk::PipelineShaderStageCreateInfo::builder()
                 .stage(vk::ShaderStageFlags::MISS_NV)
-                .module(miss_shader_module)
-                .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
+                .module(shader_module)
+                .name(std::ffi::CStr::from_bytes_with_nul(b"main_miss\0").unwrap())
+                // .module(miss_shader_module)
+                // .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
                 .build(),
         ];
 

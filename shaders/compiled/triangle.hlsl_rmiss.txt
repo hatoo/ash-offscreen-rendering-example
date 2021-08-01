@@ -13,11 +13,11 @@
                OpName %payload "payload"
                OpName %main "main"
       %float = OpTypeFloat 32
-    %float_0 = OpConstant %float 0
+    %float_1 = OpConstant %float 1
 %float_0_100000001 = OpConstant %float 0.100000001
 %float_0_300000012 = OpConstant %float 0.300000012
     %v3float = OpTypeVector %float 3
-          %9 = OpConstantComposite %v3float %float_0 %float_0_100000001 %float_0_300000012
+          %9 = OpConstantComposite %v3float %float_1 %float_0_100000001 %float_0_300000012
     %Payload = OpTypeStruct %v3float
 %_ptr_IncomingRayPayloadNV_Payload = OpTypePointer IncomingRayPayloadNV %Payload
        %void = OpTypeVoid
