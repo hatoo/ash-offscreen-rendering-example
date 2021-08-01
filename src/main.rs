@@ -38,45 +38,47 @@ fn main() {
         Ok(true)
     );
 
-    let application_name = CString::new("Hello Triangle").unwrap();
-    let engine_name = CString::new("No Engine").unwrap();
+    let instance = {
+        let application_name = CString::new("Hello Triangle").unwrap();
+        let engine_name = CString::new("No Engine").unwrap();
 
-    let mut debug_utils_create_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
-        .message_severity(
-            vk::DebugUtilsMessageSeverityFlagsEXT::WARNING |
+        let mut debug_utils_create_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
+            .message_severity(
+                vk::DebugUtilsMessageSeverityFlagsEXT::WARNING |
             // vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE |
             // vk::DebugUtilsMessageSeverityFlagsEXT::INFO |
             vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
-        )
-        .message_type(
-            vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
-                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
-        )
-        .pfn_user_callback(Some(default_vulkan_debug_utils_callback))
+            )
+            .message_type(
+                vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                    | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                    | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+            )
+            .pfn_user_callback(Some(default_vulkan_debug_utils_callback))
+            .build();
+
+        let application_info = vk::ApplicationInfo::builder()
+            .application_name(application_name.as_c_str())
+            .application_version(make_version(1, 0, 0))
+            .engine_name(engine_name.as_c_str())
+            .engine_version(make_version(1, 0, 0))
+            .api_version(API_VERSION_1_2)
+            .build();
+
+        let instance_create_info = vk::InstanceCreateInfo::builder()
+            .application_info(&application_info)
+            .enabled_layer_names(validation_layers_ptr.as_slice());
+
+        let instance_create_info = if ENABLE_VALIDATION_LAYER {
+            instance_create_info.push_next(&mut debug_utils_create_info)
+        } else {
+            instance_create_info
+        }
         .build();
 
-    let application_info = vk::ApplicationInfo::builder()
-        .application_name(application_name.as_c_str())
-        .application_version(make_version(1, 0, 0))
-        .engine_name(engine_name.as_c_str())
-        .engine_version(make_version(1, 0, 0))
-        .api_version(API_VERSION_1_2)
-        .build();
-
-    let instance_create_info = vk::InstanceCreateInfo::builder()
-        .application_info(&application_info)
-        .enabled_layer_names(validation_layers_ptr.as_slice());
-
-    let instance_create_info = if ENABLE_VALIDATION_LAYER {
-        instance_create_info.push_next(&mut debug_utils_create_info)
-    } else {
-        instance_create_info
-    }
-    .build();
-
-    let instance = unsafe { entry.create_instance(&instance_create_info, None) }
-        .expect("failed to create instance!");
+        unsafe { entry.create_instance(&instance_create_info, None) }
+            .expect("failed to create instance!")
+    };
 
     let (physical_device, queue_family_index) =
         pick_physical_device_and_queue_family_indices(&instance)
