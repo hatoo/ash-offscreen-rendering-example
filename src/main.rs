@@ -6,12 +6,7 @@ use std::{
     ptr::{self, null},
 };
 
-use ash::{
-    prelude::VkResult,
-    version::{DeviceV1_0, EntryV1_0, InstanceV1_0},
-    vk::{self, make_version, QueueFlags, API_VERSION_1_2},
-    Instance,
-};
+use ash::{prelude::VkResult, vk};
 
 fn main() {
     const ENABLE_VALIDATION_LAYER: bool = cfg!(debug_assertions);
@@ -62,10 +57,10 @@ fn main() {
 
         let application_info = vk::ApplicationInfo::builder()
             .application_name(application_name.as_c_str())
-            .application_version(make_version(1, 0, 0))
+            .application_version(vk::make_api_version(0, 1, 0, 0))
             .engine_name(engine_name.as_c_str())
-            .engine_version(make_version(1, 0, 0))
-            .api_version(API_VERSION_1_2)
+            .engine_version(vk::make_api_version(0, 1, 0, 0))
+            .api_version(vk::API_VERSION_1_2)
             .build();
 
         let instance_create_info = vk::InstanceCreateInfo::builder()
@@ -716,7 +711,7 @@ fn check_validation_layer_support<'a>(
 }
 
 fn pick_physical_device_and_queue_family_indices(
-    instance: &Instance,
+    instance: &ash::Instance,
 ) -> VkResult<Option<(vk::PhysicalDevice, u32)>> {
     Ok(unsafe { instance.enumerate_physical_devices() }?
         .into_iter()
@@ -727,7 +722,9 @@ fn pick_physical_device_and_queue_family_indices(
                     .enumerate()
                     .find(|(_, device_properties)| {
                         device_properties.queue_count > 0
-                            && device_properties.queue_flags.contains(QueueFlags::GRAPHICS)
+                            && device_properties
+                                .queue_flags
+                                .contains(vk::QueueFlags::GRAPHICS)
                     });
 
             graphics_family.map(|(i, _)| (physical_device, i as u32))
