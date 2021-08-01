@@ -275,6 +275,84 @@ fn main() {
         unsafe { device.create_image_view(&image_view_create_info, None) }.unwrap()
     };
 
+    let command_buffer = {
+        let allocate_info = vk::CommandBufferAllocateInfo::builder()
+            .command_buffer_count(1)
+            .command_pool(command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .build();
+
+        let command_buffers = unsafe { device.allocate_command_buffers(&allocate_info) }.unwrap();
+        command_buffers[0]
+    };
+
+    unsafe {
+        device.begin_command_buffer(
+            command_buffer,
+            &vk::CommandBufferBeginInfo::builder()
+                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
+                .build(),
+        )
+    }
+    .unwrap();
+
+    let image_barrier = vk::ImageMemoryBarrier::builder()
+        .src_access_mask(vk::AccessFlags::empty())
+        .dst_access_mask(vk::AccessFlags::empty())
+        .old_layout(vk::ImageLayout::UNDEFINED)
+        .new_layout(vk::ImageLayout::GENERAL)
+        .image(image)
+        .subresource_range(
+            vk::ImageSubresourceRange::builder()
+                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                .base_mip_level(0)
+                .level_count(1)
+                .base_array_layer(0)
+                .layer_count(1)
+                .build(),
+        )
+        .build();
+
+    unsafe {
+        device.cmd_pipeline_barrier(
+            command_buffer,
+            vk::PipelineStageFlags::ALL_COMMANDS,
+            vk::PipelineStageFlags::ALL_COMMANDS,
+            vk::DependencyFlags::empty(),
+            &[],
+            &[],
+            &[image_barrier],
+        );
+
+        device.end_command_buffer(command_buffer).unwrap();
+
+        let fence = {
+            let fence_create_info = vk::FenceCreateInfo::builder()
+                .flags(vk::FenceCreateFlags::SIGNALED)
+                .build();
+
+            unsafe { device.create_fence(&fence_create_info, None) }
+                .expect("Failed to create Fence Object!")
+        };
+
+        let submit_infos = [vk::SubmitInfo::builder()
+            .command_buffers(&[command_buffer])
+            .build()];
+
+        unsafe {
+            device
+                .reset_fences(&[fence])
+                .expect("Failed to reset Fence!");
+
+            device
+                .queue_submit(graphics_queue, &submit_infos, fence)
+                .expect("Failed to execute queue submit.");
+
+            device.wait_for_fences(&[fence], true, u64::MAX).unwrap();
+            device.destroy_fence(fence, None);
+        }
+    }
+
     // acceleration structures
 
     let (vertex_count, vertex_stride, vertex_buffer, vertex_memory) = {
@@ -1011,13 +1089,11 @@ fn main() {
 
     let (shader_binding_table_buffer, shader_binding_table_memory) = {
         let group_count = 3; // Listed in vk::RayTracingPipelineCreateInfoNV
-        let table_size = (rt_properties.shader_group_handle_size * group_count) as u64;
-        /*
+                             // let table_size = (rt_properties.shader_group_handle_size * group_count) as u64;
         let table_size = (aligned_size(
             rt_properties.shader_group_handle_size,
             rt_properties.shader_group_base_alignment,
         ) * group_count) as u64;
-        */
         let mut table_data: Vec<u8> = vec![0u8; table_size as usize];
         unsafe {
             ray_tracing
@@ -1412,7 +1488,7 @@ fn main() {
             device.cmd_copy_image(
                 copy_cmd,
                 image,
-                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                vk::ImageLayout::GENERAL,
                 dst_image,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 &[copy_region],
