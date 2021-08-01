@@ -348,129 +348,60 @@ fn main() {
         .level(vk::CommandBufferLevel::PRIMARY)
         .build();
 
-    let command_buffers = unsafe { device.allocate_command_buffers(&command_buffer_allocate_info) }
-        .expect("Failed to allocate Command Buffers!");
+    let command_buffer = unsafe { device.allocate_command_buffers(&command_buffer_allocate_info) }
+        .expect("Failed to allocate Command Buffers!")[0];
 
-    let command_buffer_begin_info = vk::CommandBufferBeginInfo {
-        s_type: vk::StructureType::COMMAND_BUFFER_BEGIN_INFO,
-        p_next: ptr::null(),
-        p_inheritance_info: ptr::null(),
-        flags: vk::CommandBufferUsageFlags::SIMULTANEOUS_USE,
-    };
+    let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
+        .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE)
+        .build();
 
-    unsafe {
-        device
-            .begin_command_buffer(command_buffers[0], &command_buffer_begin_info)
-            .expect("Failed to begin recording Command Buffer at beginning!");
-    }
+    unsafe { device.begin_command_buffer(command_buffer, &command_buffer_begin_info) }
+        .expect("Failed to begin recording Command Buffer at beginning!");
 
-    let clear_values = [vk::ClearValue {
-        color: vk::ClearColorValue {
-            float32: [0.0, 0.0, 0.0, 1.0],
-        },
-    }];
-
-    let render_pass_begin_info = vk::RenderPassBeginInfo {
-        s_type: vk::StructureType::RENDER_PASS_BEGIN_INFO,
-        p_next: ptr::null(),
-        render_pass,
-        framebuffer,
-        render_area: vk::Rect2D {
+    let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+        .render_pass(render_pass)
+        .framebuffer(framebuffer)
+        .render_area(vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
             extent,
-        },
-        clear_value_count: clear_values.len() as u32,
-        p_clear_values: clear_values.as_ptr(),
-    };
+        })
+        .clear_values(&[vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [0.0, 0.0, 0.0, 1.0],
+            },
+        }])
+        .build();
 
     unsafe {
         device.cmd_begin_render_pass(
-            command_buffers[0],
+            command_buffer,
             &render_pass_begin_info,
             vk::SubpassContents::INLINE,
         );
         device.cmd_bind_pipeline(
-            command_buffers[0],
+            command_buffer,
             vk::PipelineBindPoint::GRAPHICS,
             graphics_pipeline,
         );
-        device.cmd_draw(command_buffers[0], 3, 1, 0, 0);
+        device.cmd_draw(command_buffer, 3, 1, 0, 0);
 
-        device.cmd_end_render_pass(command_buffers[0]);
+        device.cmd_end_render_pass(command_buffer);
 
         device
-            .end_command_buffer(command_buffers[0])
+            .end_command_buffer(command_buffer)
             .expect("Failed to record Command Buffer at Ending!");
     }
 
-    /*
+    let fence_create_info = vk::FenceCreateInfo::builder()
+        .flags(vk::FenceCreateFlags::SIGNALED)
+        .build();
 
-    let semaphore_create_info = vk::SemaphoreCreateInfo {
-        s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
-        p_next: ptr::null(),
-        flags: vk::SemaphoreCreateFlags::empty(),
-    };
+    let fence = unsafe { device.create_fence(&fence_create_info, None) }
+        .expect("Failed to create Fence Object!");
 
-    let fence_create_info = vk::FenceCreateInfo {
-        s_type: vk::StructureType::FENCE_CREATE_INFO,
-        p_next: ptr::null(),
-        flags: vk::FenceCreateFlags::SIGNALED,
-    };
-
-    let image_available_semaphores: Vec<vk::Semaphore> = (0..MAX_FRAMES_IN_FLIGHT)
-        .map(|_| unsafe {
-            device
-                .create_semaphore(&semaphore_create_info, None)
-                .expect("Failed to create Semaphore Object!")
-        })
-        .collect();
-
-    let render_finished_semaphores: Vec<vk::Semaphore> = (0..MAX_FRAMES_IN_FLIGHT)
-        .map(|_| unsafe {
-            device
-                .create_semaphore(&semaphore_create_info, None)
-                .expect("Failed to create Semaphore Object!")
-        })
-        .collect();
-
-    let in_flight_fences: Vec<vk::Fence> = (0..MAX_FRAMES_IN_FLIGHT)
-        .map(|_| unsafe {
-            device
-                .create_fence(&fence_create_info, None)
-                .expect("Failed to create Fence Object!")
-        })
-        .collect();
-
-    let wait_fences = [in_flight_fences[current_frame]];
-
-    let wait_semaphores = [image_available_semaphores[current_frame]];
-    let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-    let signal_semaphores = [render_finished_semaphores[current_frame]];
-    */
-
-    let fence_create_info = vk::FenceCreateInfo {
-        s_type: vk::StructureType::FENCE_CREATE_INFO,
-        p_next: ptr::null(),
-        flags: vk::FenceCreateFlags::SIGNALED,
-    };
-
-    let fence = unsafe {
-        device
-            .create_fence(&fence_create_info, None)
-            .expect("Failed to create Fence Object!")
-    };
-
-    let submit_infos = [vk::SubmitInfo {
-        s_type: vk::StructureType::SUBMIT_INFO,
-        p_next: ptr::null(),
-        wait_semaphore_count: 0,
-        p_wait_semaphores: null(),
-        p_wait_dst_stage_mask: null(),
-        command_buffer_count: 1,
-        p_command_buffers: &command_buffers[0],
-        signal_semaphore_count: 0,
-        p_signal_semaphores: null(),
-    }];
+    let submit_infos = [vk::SubmitInfo::builder()
+        .command_buffers(&[command_buffer])
+        .build()];
 
     unsafe {
         device
@@ -483,12 +414,6 @@ fn main() {
 
         device.wait_for_fences(&[fence], true, u64::MAX).unwrap();
     }
-
-    unsafe {
-        device
-            .device_wait_idle()
-            .expect("Failed to wait device idle!")
-    };
 
     // transfer to host
 
