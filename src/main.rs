@@ -108,55 +108,32 @@ fn main() {
     };
 
     let graphics_queue = unsafe { device.get_device_queue(queue_family_index, 0) };
-    // let present_queue = unsafe { device.get_device_queue(queue_families.present_family, 0) };
 
     const SHADER: &[u8] = include_bytes!(env!("shader.spv"));
 
     let shader_module = unsafe { create_shader_module(&device, SHADER).unwrap() };
 
-    let main_vs = CString::new("main_vs").unwrap(); // the beginning function name in shader code.
-    let main_fs = CString::new("main_fs").unwrap(); // the beginning function name in shader code.
+    let main_vs = CString::new("main_vs").unwrap();
+    let main_fs = CString::new("main_fs").unwrap();
 
     let shader_stages = [
-        vk::PipelineShaderStageCreateInfo {
-            // Vertex Shader
-            s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::PipelineShaderStageCreateFlags::empty(),
-            module: shader_module,
-            p_name: main_vs.as_ptr(),
-            p_specialization_info: ptr::null(),
-            stage: vk::ShaderStageFlags::VERTEX,
-        },
-        vk::PipelineShaderStageCreateInfo {
-            // Fragment Shader
-            s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::PipelineShaderStageCreateFlags::empty(),
-            module: shader_module,
-            p_name: main_fs.as_ptr(),
-            p_specialization_info: ptr::null(),
-            stage: vk::ShaderStageFlags::FRAGMENT,
-        },
+        vk::PipelineShaderStageCreateInfo::builder()
+            .module(shader_module)
+            .name(main_vs.as_c_str())
+            .stage(vk::ShaderStageFlags::VERTEX)
+            .build(),
+        vk::PipelineShaderStageCreateInfo::builder()
+            .module(shader_module)
+            .name(main_fs.as_c_str())
+            .stage(vk::ShaderStageFlags::FRAGMENT)
+            .build(),
     ];
 
-    let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo {
-        s_type: vk::StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        p_next: ptr::null(),
-        flags: vk::PipelineVertexInputStateCreateFlags::empty(),
-        vertex_attribute_description_count: 0,
-        p_vertex_attribute_descriptions: ptr::null(),
-        vertex_binding_description_count: 0,
-        p_vertex_binding_descriptions: ptr::null(),
-    };
-
-    let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo {
-        s_type: vk::StructureType::PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-        flags: vk::PipelineInputAssemblyStateCreateFlags::empty(),
-        p_next: ptr::null(),
-        primitive_restart_enable: vk::FALSE,
-        topology: vk::PrimitiveTopology::TRIANGLE_LIST,
-    };
+    let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo::default();
+    let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo::builder()
+        .primitive_restart_enable(false)
+        .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
+        .build();
 
     let extent = vk::Extent2D::builder().width(WIDTH).height(HEIGHT).build();
 
