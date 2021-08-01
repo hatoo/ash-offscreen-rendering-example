@@ -167,6 +167,15 @@ fn main() {
 
     let graphics_queue = unsafe { device.get_device_queue(queue_family_index, 0) };
 
+    let command_pool = {
+        let command_pool_create_info = vk::CommandPoolCreateInfo::builder()
+            .queue_family_index(queue_family_index)
+            .build();
+
+        unsafe { device.create_command_pool(&command_pool_create_info, None) }
+            .expect("Failed to create Command Pool!")
+    };
+
     let pipeline_layout = {
         let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default();
 
@@ -387,7 +396,7 @@ fn main() {
                 vk::AccelerationStructureInfoNV::builder()
                     .ty(vk::AccelerationStructureTypeNV::BOTTOM_LEVEL)
                     .geometries(&geometry)
-                    .flags(vk::BuildAccelerationStructureFlagsNV::PREFER_FAST_TRACE)
+                    // .flags(vk::BuildAccelerationStructureFlagsNV::PREFER_FAST_TRACE)
                     .build(),
             )
             .build();
@@ -623,6 +632,119 @@ fn main() {
         (buffer, memory)
     };
 
+    // Build
+
+    let build_command_buffer = {
+        let allocate_info = vk::CommandBufferAllocateInfo::builder()
+            .command_buffer_count(1)
+            .command_pool(command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .build();
+
+        let command_buffers = unsafe { device.allocate_command_buffers(&allocate_info) }.unwrap();
+        command_buffers[0]
+    };
+
+    unsafe {
+        device.begin_command_buffer(
+            build_command_buffer,
+            &vk::CommandBufferBeginInfo::builder()
+                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
+                .build(),
+        )
+    }
+    .unwrap();
+
+    let memory_barrier = vk::MemoryBarrier::builder()
+        .src_access_mask(
+            vk::AccessFlags::ACCELERATION_STRUCTURE_WRITE_NV
+                | vk::AccessFlags::ACCELERATION_STRUCTURE_READ_NV,
+        )
+        .dst_access_mask(
+            vk::AccessFlags::ACCELERATION_STRUCTURE_WRITE_NV
+                | vk::AccessFlags::ACCELERATION_STRUCTURE_READ_NV,
+        )
+        .build();
+
+    unsafe {
+        ray_tracing.cmd_build_acceleration_structure(
+            build_command_buffer,
+            &vk::AccelerationStructureInfoNV::builder()
+                .ty(vk::AccelerationStructureTypeNV::BOTTOM_LEVEL)
+                .geometries(&geometry)
+                .build(),
+            vk::Buffer::null(),
+            0,
+            false,
+            bottom_as,
+            vk::AccelerationStructureNV::null(),
+            scratch_buffer,
+            0,
+        );
+    }
+
+    unsafe {
+        device.cmd_pipeline_barrier(
+            build_command_buffer,
+            vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_NV,
+            vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_NV,
+            vk::DependencyFlags::empty(),
+            &[memory_barrier],
+            &[],
+            &[],
+        );
+    }
+
+    unsafe {
+        ray_tracing.cmd_build_acceleration_structure(
+            build_command_buffer,
+            &vk::AccelerationStructureInfoNV::builder()
+                .ty(vk::AccelerationStructureTypeNV::TOP_LEVEL)
+                .instance_count(instance_count as u32)
+                .build(),
+            instance_buffer,
+            0,
+            false,
+            top_as,
+            vk::AccelerationStructureNV::null(),
+            scratch_buffer,
+            0,
+        );
+    }
+
+    unsafe {
+        device.cmd_pipeline_barrier(
+            build_command_buffer,
+            vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_NV,
+            vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_NV,
+            vk::DependencyFlags::empty(),
+            &[memory_barrier],
+            &[],
+            &[],
+        );
+    }
+
+    unsafe {
+        device.end_command_buffer(build_command_buffer).unwrap();
+    }
+
+    unsafe {
+        device
+            .queue_submit(
+                graphics_queue,
+                &[vk::SubmitInfo::builder()
+                    .command_buffers(&[build_command_buffer])
+                    .build()],
+                vk::Fence::null(),
+            )
+            .expect("queue submit failed.");
+    }
+
+    unsafe {
+        device.queue_wait_idle(graphics_queue).unwrap();
+        device.free_command_buffers(command_pool, &[build_command_buffer]);
+    }
+
     // render pass
 
     let render_pass = {
@@ -794,15 +916,6 @@ fn main() {
 
         unsafe { device.create_framebuffer(&framebuffer_create_info, None) }
             .expect("Failed to create Framebuffer!")
-    };
-
-    let command_pool = {
-        let command_pool_create_info = vk::CommandPoolCreateInfo::builder()
-            .queue_family_index(queue_family_index)
-            .build();
-
-        unsafe { device.create_command_pool(&command_pool_create_info, None) }
-            .expect("Failed to create Command Pool!")
     };
 
     let command_buffer = {
